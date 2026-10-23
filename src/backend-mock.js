@@ -199,14 +199,10 @@ function createMockPreview() {
     if (!handler || pending === null) return;
     const json = pending;
     pending = null;
+    // Like GameRush, only note the failure. sdk.js has already sent the error to the console.
     try {
       handler(JSON.parse(json));
-    } catch (error) {
-      // GameRush only notes the failure. The mock surfaces it so the author sees it in the console.
-      queueMicrotask(() => {
-        throw error;
-      });
-    }
+    } catch {}
   }
 
   function schedule() {
@@ -252,7 +248,7 @@ export function createMockBackend(config) {
     if (typeof pseudoId !== "string" || !pseudoId) return false;
     if (!isPlainObject(payload)) return false;
     const rating = extra.rating ?? null;
-    if (rating !== null && !isRating(rating)) return false;
+    if (rating !== null && !Number.isFinite(rating)) return false;
     const revision = extra.revision ?? 1;
     if (!Number.isInteger(revision) || revision < 0) return false;
     let json;

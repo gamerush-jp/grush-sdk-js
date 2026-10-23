@@ -105,7 +105,7 @@ test("onPreview holds one runtime registration for several handlers, each with i
   assert.notEqual(runtime.handler, null);
 });
 
-test("onPreview runs every handler and then throws the first error back to the runtime", () => {
+test("onPreview reports every error to the console and throws the first back to the runtime", () => {
   const runtime = fakePlayerState();
   installRuntime(runtime);
   const seen = [];
@@ -126,8 +126,9 @@ test("onPreview runs every handler and then throws the first error back to the r
     globalThis.queueMicrotask = original;
   }
   assert.deepEqual(seen, [STATE]);
-  assert.equal(deferred.length, 1);
-  assert.throws(deferred[0], /second/);
+  assert.equal(deferred.length, 2);
+  assert.throws(deferred[0], /first/);
+  assert.throws(deferred[1], /second/);
 });
 
 test("onPreview does nothing below protocol 10", () => {
@@ -224,10 +225,20 @@ test("the mock rejects a preview whose shape GameRush would not hand over", asyn
   assert.equal(sdk.mock.previewPlayerState("", { level: 1 }), false);
   assert.equal(sdk.mock.previewPlayerState("p2", [1]), false);
   assert.equal(sdk.mock.previewPlayerState("p2", { level: 1 }, { rating: Number.NaN }), false);
+  assert.equal(sdk.mock.previewPlayerState("p2", { level: 1 }, { rating: "1" }), false);
   assert.equal(sdk.mock.previewPlayerState("p2", { level: 1 }, { revision: -1 }), false);
   assert.equal(sdk.mock.previewPlayerState("p2", { big: 1n }), false);
   await flush();
   assert.equal(seen.length, 0);
+});
+
+test("the mock takes any finite rating, as GameRush does", async () => {
+  globalThis.location = { protocol: "http:", hostname: "localhost" };
+  const seen = [];
+  sdk.playerState.onPreview((state) => seen.push(state));
+  assert.equal(sdk.mock.previewPlayerState("p2", { level: 1 }, { rating: 5e9 }), true);
+  await flush();
+  assert.equal(seen[0].rating, 5e9);
 });
 
 test("mock.reset drops a preview not handed over yet", async () => {

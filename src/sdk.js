@@ -474,9 +474,9 @@ function previewStateOf(raw) {
 
 // Handlers stay registered on the SDK, and only one subscription is held on the backend. When
 // configure() switches the backend, that subscription moves to the new one. Each handler gets its own
-// copy, and one handler throwing does not stop the others. With `rethrow`, the first error is thrown
-// back to the backend after every handler has run, so GameRush learns that the game failed to handle
-// the event; the rest are reported asynchronously as with `rethrow: false`.
+// copy, and one handler throwing does not stop the others. Every error is rethrown asynchronously so it
+// reaches the console. With `rethrow`, the first error is also thrown back to the backend after every
+// handler has run, so GameRush learns that the game failed to handle the event.
 function createRelay(backend, { minProtocol, subscribe, copyOf, rethrow }) {
   const handlers = new Set();
   let binding = null;
@@ -507,10 +507,7 @@ function createRelay(backend, { minProtocol, subscribe, copyOf, rethrow }) {
       try {
         entry.handler(copyOf(raw));
       } catch (error) {
-        if (rethrow && !first) {
-          first = { error };
-          continue;
-        }
+        if (rethrow && !first) first = { error };
         queueMicrotask(() => {
           throw error;
         });

@@ -1255,10 +1255,7 @@ function createMockPreview() {
     pending = null;
     try {
       handler(JSON.parse(json));
-    } catch (error) {
-      queueMicrotask(() => {
-        throw error;
-      });
+    } catch {
     }
   }
   function schedule() {
@@ -1300,7 +1297,7 @@ function createMockBackend(config) {
     if (typeof pseudoId !== "string" || !pseudoId) return false;
     if (!isPlainObject3(payload)) return false;
     const rating = extra.rating ?? null;
-    if (rating !== null && !isRating(rating)) return false;
+    if (rating !== null && !Number.isFinite(rating)) return false;
     const revision = extra.revision ?? 1;
     if (!Number.isInteger(revision) || revision < 0) return false;
     let json;
@@ -2580,10 +2577,7 @@ function createRelay(backend, { minProtocol, subscribe, copyOf, rethrow }) {
       try {
         entry.handler(copyOf(raw));
       } catch (error) {
-        if (rethrow && !first) {
-          first = { error };
-          continue;
-        }
+        if (rethrow && !first) first = { error };
         queueMicrotask(() => {
           throw error;
         });
