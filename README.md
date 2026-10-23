@@ -13,11 +13,11 @@ GameRush はアップロードされた全ビルドへランタイム JS（`wind
 どれか 1 つ。
 
 ```bash
-git submodule add https://github.com/gamerush-cc/grush-sdk-js.git vendor/grush-sdk-js
+git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-sdk-js
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-cc/grush-sdk-js@v0.12.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.12.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
