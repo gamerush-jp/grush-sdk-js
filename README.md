@@ -180,7 +180,12 @@ if (mine.ok) {
     save.appliedTrades.push(trade.id);
   }
   const saved = await GRush.cloudSave.save(save);
-  if (saved.ok && done.length) await GRush.trade.ack(done.map((trade) => trade.id));
+  if (saved.ok) {
+    // ack に渡せるのは 1 回 50 件まで
+    for (let i = 0; i < done.length; i += 50) {
+      await GRush.trade.ack(done.slice(i, i + 50).map((trade) => trade.id));
+    }
+  }
 }
 ```
 
@@ -310,7 +315,7 @@ if (joined.ok) {
 
 ## ローカルでの動作確認
 
-`localhost`・`127.0.0.1`・`file://` では `GRush.backend` が `"mock"` になる（ESM 版は `file://` だとブラウザが読み込みを拒むので、ローカルサーバから開く）。GameRush 上では `"web"`、それ以外のサイトでは `"none"`。`GRush.configure({ backend: "mock" })` で強制もできる。
+`localhost`・`127.0.0.1`・`[::1]`・`file://` では `GRush.backend` が `"mock"` になる（ESM 版は `file://` だとブラウザが読み込みを拒むので、ローカルサーバから開く）。GameRush 上では `"web"`、それ以外のサイトでは `"none"`。`GRush.configure({ backend: "mock" })` で強制もできる。
 
 ```js
 if (GRush.backend === "mock") {
