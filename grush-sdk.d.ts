@@ -471,6 +471,16 @@ export interface GRushMock {
     options?: { hidden?: boolean; rating?: number | null },
   ): void;
   /**
+   * `playerState.onPreview` の `handler` に、確認用の表示の状態を渡す。渡すのは呼び出しの後（非同期）で、
+   * `handler` が無ければ次に登録したときに渡す。`revision` は省略すると 1、`rating` は省略すると `null`。
+   * 形が合わなければ何もせず `false`。
+   */
+  previewPlayerState(
+    pseudoId: string,
+    payload: { [key: string]: JsonValue },
+    options?: { revision?: number; rating?: number | null },
+  ): boolean;
+  /**
    * モックの相手の疑似 ID。それぞれ rating 付きの公開プレイヤー状態を持ち、届いたメッセージを同じ
    * `kind` と `payload` で送り返す。`reset()` の後は、最初の相手からのメッセージ1通と、受付中の出品を2件持つ。
    */
@@ -544,6 +554,16 @@ export interface GRushSdk {
      * 名前も返らない。`protocolVersion` 7 未満の GameRush では `unsupported`。
      */
     sample(options?: GRushSampleOptions): Promise<GRushResult<GRushPlayerState[]>>;
+    /**
+     * GameRush の確認用の表示で、ある公開プレイヤー状態がほかのプレイヤーにどう見えるかを描くよう頼まれたときに
+     * `handler` を呼ぶ。他プレイヤーの状態を描くときと同じ見た目で描く。返り値は解除関数。
+     *
+     * 同じ状態は1回だけ渡る。登録より先に届いていた状態は、登録したときに渡る。それより後に足した `handler` には
+     * 渡らないので、起動したらすぐ登録する。`handler` が例外を投げると、GameRush には描けなかったと伝わる。
+     * ふだんのプレイでは呼ばれない。`protocolVersion` 10 未満の GameRush と GameRush の外では呼ばれない。
+     * `configure({ backend })` でバックエンドを切り替えても購読は続く。
+     */
+    onPreview(handler: (state: GRushPlayerState) => void): () => void;
   };
   /**
    * 受信箱。同じゲームの疑似 ID 宛てに、小さい構造化メッセージ（非同期対戦の結果の通知など）を送り、

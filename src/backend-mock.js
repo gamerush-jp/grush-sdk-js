@@ -8,8 +8,8 @@ import { CODES, failure, ok } from "./result.js";
 const MANIFEST_TIMEOUT_MS = 3000;
 // How many analytics events mock.analyticsEvents() keeps, newest last.
 export const MOCK_ANALYTICS_MAX_EVENTS = 200;
-// The newest protocol the mock implements (launch parameters on share need 9).
-const MOCK_PROTOCOL_VERSION = 9;
+// The newest protocol the mock implements (playerState.onPreview needs 10).
+const MOCK_PROTOCOL_VERSION = 10;
 
 const STORAGE_KEY = "grush-sdk-mock";
 const SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -179,6 +179,64 @@ function stateWire({ hidden: _hidden, ...state }) {
   return state;
 }
 
+function isPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+// Mirrors GameRush: one handler, replaced by the next registration. A preview is handed over once,
+// after the current call returns, and a handler registered later still gets a preview not handed
+// over yet.
+function createMockPreview() {
+  let pending = null;
+  let handler = null;
+  let token = null;
+  let scheduled = false;
+
+  function deliver() {
+    scheduled = false;
+    if (!handler || pending === null) return;
+    const json = pending;
+    pending = null;
+    try {
+      handler(JSON.parse(json));
+    } catch (error) {
+      // GameRush only notes the failure. The mock surfaces it so the author sees it in the console.
+      queueMicrotask(() => {
+        throw error;
+      });
+    }
+  }
+
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(deliver);
+  }
+
+  return {
+    show(json) {
+      pending = json;
+      schedule();
+    },
+    onPreview(next) {
+      const own = {};
+      handler = next;
+      token = own;
+      schedule();
+      return () => {
+        if (token !== own) return;
+        handler = null;
+        token = null;
+      };
+    },
+    reset() {
+      pending = null;
+    },
+  };
+}
+
 export function createMockBackend(config) {
   const otherStates = new Map();
   const cloudSaves = new Map();
@@ -186,6 +244,32 @@ export function createMockBackend(config) {
   let analyticsEvents = [];
   const analyticsWarned = new Set();
   let myState = null;
+  const preview = createMockPreview();
+
+  // Checks the shape GameRush checks before it hands a preview to the game.
+  function previewPlayerState(pseudoId, payload, options) {
+    const extra = options ?? {};
+    if (typeof pseudoId !== "string" || !pseudoId) return false;
+    if (!isPlainObject(payload)) return false;
+    const rating = extra.rating ?? null;
+    if (rating !== null && !isRating(rating)) return false;
+    const revision = extra.revision ?? 1;
+    if (!Number.isInteger(revision) || revision < 0) return false;
+    let json;
+    try {
+      json = JSON.stringify({
+        pseudoId,
+        payload,
+        revision,
+        rating,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      return false;
+    }
+    preview.show(json);
+    return true;
+  }
 
   function putState(pseudoId, payload, options) {
     otherStates.set(pseudoId, {
@@ -542,6 +626,7 @@ export function createMockBackend(config) {
       leaderboards.addRival(key, displayName, value, options),
     definePlayerState: (pseudoId, payload, options) =>
       putState(pseudoId, structuredClone(payload), options ?? {}),
+    previewPlayerState,
     rivals: MOCK_RIVALS,
     receiveInbox: social.controls.receiveInbox,
     offerTrade: social.controls.offerTrade,
@@ -563,6 +648,7 @@ export function createMockBackend(config) {
       analyticsEvents = [];
       analyticsWarned.clear();
       myState = null;
+      preview.reset();
       net.reset();
       Object.assign(config, defaultMockConfig());
       writeStored({ consent: false });
@@ -576,6 +662,7 @@ export function createMockBackend(config) {
     protocolVersion: () => MOCK_PROTOCOL_VERSION,
     localeCurrent: () => mockLocale(config),
     localeOnChange: () => () => {},
+    playerStateOnPreview: (handler) => preview.onPreview(handler),
     launchCurrent: () => mockLaunch(config),
     analyticsAvailable: () => true,
     logAnalytics,

@@ -23,7 +23,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.11.0";
+export const VERSION = "0.12.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -37,6 +37,7 @@ const TRADE_PROTOCOL_VERSION = 7;
 const LAUNCH_PROTOCOL_VERSION = 8;
 // launchParams on share. Older runtimes drop them and would share a link without them.
 const SHARE_LAUNCH_PROTOCOL_VERSION = 9;
+const PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 const BACKENDS = new Set(["auto", "web", "mock", "none"]);
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -69,8 +70,6 @@ export function createGRush(options = {}) {
   const webBackend = createWebBackend();
   let selection = BACKENDS.has(options.backend) ? options.backend : "auto";
   let currentRoom = null;
-  const localeHandlers = new Set();
-  let localeBinding = null;
 
   function backend() {
     if (selection === "web") return webBackend;
@@ -153,6 +152,19 @@ export function createGRush(options = {}) {
       ? Promise.resolve(failure(CODES.invalidParams, `${label} options must be an object.`))
       : null;
 
+  const localeRelay = createRelay(backend, {
+    minProtocol: LOCALE_PROTOCOL_VERSION,
+    subscribe: (target, dispatch) => target.localeOnChange?.(dispatch),
+    copyOf: localeOf,
+    rethrow: false,
+  });
+  const previewRelay = createRelay(backend, {
+    minProtocol: PLAYER_STATE_PREVIEW_PROTOCOL_VERSION,
+    subscribe: (target, dispatch) => target.playerStateOnPreview?.(dispatch),
+    copyOf: previewStateOf,
+    rethrow: true,
+  });
+
   const playerState = {
     getMine: () => statesCall("playerState.getMine", undefined, orNull(playerStateOf)),
     setMine(payload, baseRevision, rawExtra) {
@@ -180,6 +192,7 @@ export function createGRush(options = {}) {
         MATCHMAKING_PROTOCOL_VERSION,
       );
     },
+    onPreview: (handler) => previewRelay.subscribe(handler),
   };
 
   const inbox = {
@@ -315,17 +328,7 @@ export function createGRush(options = {}) {
         return null;
       }
     },
-    onChange(handler) {
-      if (typeof handler !== "function") return () => {};
-      // Entries are objects so the same function registered twice stays two subscriptions.
-      const entry = { handler };
-      localeHandlers.add(entry);
-      bindLocale();
-      return () => {
-        if (!localeHandlers.delete(entry)) return;
-        bindLocale();
-      };
-    },
+    onChange: (handler) => localeRelay.subscribe(handler),
   };
 
   // Launch parameters arrive once, with the slide the player opened first, so there is no onChange.
@@ -341,43 +344,6 @@ export function createGRush(options = {}) {
       }
     },
   };
-
-  // The handlers stay registered on the SDK, and only one subscription is held on the backend.
-  // When configure() switches the backend, that subscription moves to the new one.
-  function bindLocale() {
-    const active = backend();
-    const target =
-      localeHandlers.size > 0 &&
-      active.isAvailable() &&
-      active.protocolVersion() >= LOCALE_PROTOCOL_VERSION
-        ? active
-        : null;
-    if ((localeBinding?.backend ?? null) === target) return;
-    const previous = localeBinding;
-    localeBinding = null;
-    previous?.off();
-    if (!target) return;
-    let off = null;
-    try {
-      off = target.localeOnChange?.(dispatchLocale);
-    } catch {}
-    localeBinding = { backend: target, off: typeof off === "function" ? off : () => {} };
-  }
-
-  function dispatchLocale(raw) {
-    if (!localeOf(raw)) return;
-    for (const entry of [...localeHandlers]) {
-      if (!localeHandlers.has(entry)) continue;
-      // Each handler gets its own copy, and one handler throwing does not stop the others.
-      try {
-        entry.handler(localeOf(raw));
-      } catch (error) {
-        queueMicrotask(() => {
-          throw error;
-        });
-      }
-    }
-  }
 
   // Analytics answers synchronously with a boolean and never throws, so a game can log from anywhere
   // without awaiting. An older GameRush or a page outside GameRush answers false.
@@ -474,7 +440,8 @@ export function createGRush(options = {}) {
       currentRoom = null;
       previous?.leave();
       selection = settings.backend;
-      bindLocale();
+      localeRelay.bind();
+      previewRelay.bind();
     },
     isAvailable() {
       const active = backend();
@@ -493,6 +460,78 @@ export function createGRush(options = {}) {
     analytics,
     net,
     mock: mockBackend.controls,
+  };
+}
+
+// A preview is a JSON copy, so each handler gets its own deep copy and can change it freely.
+function previewStateOf(raw) {
+  try {
+    return playerStateOf(structuredClone(raw));
+  } catch {
+    return null;
+  }
+}
+
+// Handlers stay registered on the SDK, and only one subscription is held on the backend. When
+// configure() switches the backend, that subscription moves to the new one. Each handler gets its own
+// copy, and one handler throwing does not stop the others. With `rethrow`, the first error is thrown
+// back to the backend after every handler has run, so GameRush learns that the game failed to handle
+// the event; the rest are reported asynchronously as with `rethrow: false`.
+function createRelay(backend, { minProtocol, subscribe, copyOf, rethrow }) {
+  const handlers = new Set();
+  let binding = null;
+
+  function bind() {
+    const active = backend();
+    const target =
+      handlers.size > 0 && active.isAvailable() && active.protocolVersion() >= minProtocol
+        ? active
+        : null;
+    if ((binding?.backend ?? null) === target) return;
+    const previous = binding;
+    binding = null;
+    previous?.off();
+    if (!target) return;
+    let off = null;
+    try {
+      off = subscribe(target, dispatch);
+    } catch {}
+    binding = { backend: target, off: typeof off === "function" ? off : () => {} };
+  }
+
+  function dispatch(raw) {
+    if (!copyOf(raw)) return;
+    let first = null;
+    for (const entry of [...handlers]) {
+      if (!handlers.has(entry)) continue;
+      try {
+        entry.handler(copyOf(raw));
+      } catch (error) {
+        if (rethrow && !first) {
+          first = { error };
+          continue;
+        }
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+    if (first) throw first.error;
+  }
+
+  return {
+    bind,
+    subscribe(handler) {
+      if (typeof handler !== "function") return () => {};
+      // Entries are objects so the same function registered twice stays two subscriptions.
+      const entry = { handler };
+      handlers.add(entry);
+      bind();
+      return () => {
+        if (!handlers.delete(entry)) return;
+        bind();
+      };
+    },
   };
 }
 

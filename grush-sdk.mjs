@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.11.0 */
+/*! GameRush SDK for JavaScript v0.12.0 */
 
 // src/analytics-rules.js
 var ANALYTICS_EVENT_KINDS = ["onboarding", "funnel", "custom", "economy"];
@@ -1103,7 +1103,7 @@ function createMockSocial({ config, selfId, isKnownPlayer, now = () => Date.now(
 // src/backend-mock.js
 var MANIFEST_TIMEOUT_MS = 3e3;
 var MOCK_ANALYTICS_MAX_EVENTS = 200;
-var MOCK_PROTOCOL_VERSION = 9;
+var MOCK_PROTOCOL_VERSION = 10;
 var STORAGE_KEY = "grush-sdk-mock";
 var SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 var PLAYER_STATE_MAX_BYTES = 4 * 1024;
@@ -1238,6 +1238,55 @@ function shuffled(items) {
 function stateWire({ hidden: _hidden, ...state }) {
   return state;
 }
+function isPlainObject3(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+function createMockPreview() {
+  let pending = null;
+  let handler = null;
+  let token = null;
+  let scheduled = false;
+  function deliver() {
+    scheduled = false;
+    if (!handler || pending === null) return;
+    const json = pending;
+    pending = null;
+    try {
+      handler(JSON.parse(json));
+    } catch (error) {
+      queueMicrotask(() => {
+        throw error;
+      });
+    }
+  }
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(deliver);
+  }
+  return {
+    show(json) {
+      pending = json;
+      schedule();
+    },
+    onPreview(next) {
+      const own = {};
+      handler = next;
+      token = own;
+      schedule();
+      return () => {
+        if (token !== own) return;
+        handler = null;
+        token = null;
+      };
+    },
+    reset() {
+      pending = null;
+    }
+  };
+}
 function createMockBackend(config) {
   const otherStates = /* @__PURE__ */ new Map();
   const cloudSaves = /* @__PURE__ */ new Map();
@@ -1245,6 +1294,30 @@ function createMockBackend(config) {
   let analyticsEvents = [];
   const analyticsWarned = /* @__PURE__ */ new Set();
   let myState = null;
+  const preview = createMockPreview();
+  function previewPlayerState(pseudoId, payload, options) {
+    const extra = options ?? {};
+    if (typeof pseudoId !== "string" || !pseudoId) return false;
+    if (!isPlainObject3(payload)) return false;
+    const rating = extra.rating ?? null;
+    if (rating !== null && !isRating(rating)) return false;
+    const revision = extra.revision ?? 1;
+    if (!Number.isInteger(revision) || revision < 0) return false;
+    let json;
+    try {
+      json = JSON.stringify({
+        pseudoId,
+        payload,
+        revision,
+        rating,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } catch {
+      return false;
+    }
+    preview.show(json);
+    return true;
+  }
   function putState(pseudoId, payload, options) {
     otherStates.set(pseudoId, {
       pseudoId,
@@ -1548,6 +1621,7 @@ function createMockBackend(config) {
     loadLeaderboards,
     addRival: (key, displayName, value, options) => leaderboards.addRival(key, displayName, value, options),
     definePlayerState: (pseudoId, payload, options) => putState(pseudoId, structuredClone(payload), options ?? {}),
+    previewPlayerState,
     rivals: MOCK_RIVALS,
     receiveInbox: social.controls.receiveInbox,
     offerTrade: social.controls.offerTrade,
@@ -1569,6 +1643,7 @@ function createMockBackend(config) {
       analyticsEvents = [];
       analyticsWarned.clear();
       myState = null;
+      preview.reset();
       net.reset();
       Object.assign(config, defaultMockConfig());
       writeStored({ consent: false });
@@ -1582,6 +1657,7 @@ function createMockBackend(config) {
     localeCurrent: () => mockLocale(config),
     localeOnChange: () => () => {
     },
+    playerStateOnPreview: (handler) => preview.onPreview(handler),
     launchCurrent: () => mockLaunch(config),
     analyticsAvailable: () => true,
     logAnalytics,
@@ -1706,6 +1782,12 @@ function createWebBackend() {
     localeCurrent: () => runtimeApi("Locale")?.current?.() ?? null,
     localeOnChange(handler) {
       const unsubscribe = runtimeApi("Locale")?.onChange?.(handler);
+      return typeof unsubscribe === "function" ? unsubscribe : () => {
+      };
+    },
+    // The runtime holds one handler and replaces it on the next call, so sdk.js registers only once.
+    playerStateOnPreview(handler) {
+      const unsubscribe = runtimeApi("PlayerState")?.onPreview?.(handler);
       return typeof unsubscribe === "function" ? unsubscribe : () => {
       };
     },
@@ -2093,7 +2175,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.11.0";
+var VERSION = "0.12.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
@@ -2105,6 +2187,7 @@ var INBOX_PROTOCOL_VERSION = 7;
 var TRADE_PROTOCOL_VERSION = 7;
 var LAUNCH_PROTOCOL_VERSION = 8;
 var SHARE_LAUNCH_PROTOCOL_VERSION = 9;
+var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 var BACKENDS = /* @__PURE__ */ new Set(["auto", "web", "mock", "none"]);
 var LOCAL_HOSTNAMES = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 var noneBackend = {
@@ -2130,8 +2213,6 @@ function createGRush(options = {}) {
   const webBackend = createWebBackend();
   let selection = BACKENDS.has(options.backend) ? options.backend : "auto";
   let currentRoom = null;
-  const localeHandlers = /* @__PURE__ */ new Set();
-  let localeBinding = null;
   function backend() {
     if (selection === "web") return webBackend;
     if (selection === "mock") return mockBackend;
@@ -2197,6 +2278,18 @@ function createGRush(options = {}) {
   };
   const tradeIn = (raw) => tradeOf(unwrap(raw, "trade")) ?? void 0;
   const optionsError = (options2, label) => options2 !== void 0 && options2 !== null && typeof options2 !== "object" ? Promise.resolve(failure(CODES.invalidParams, `${label} options must be an object.`)) : null;
+  const localeRelay = createRelay(backend, {
+    minProtocol: LOCALE_PROTOCOL_VERSION,
+    subscribe: (target, dispatch) => target.localeOnChange?.(dispatch),
+    copyOf: localeOf,
+    rethrow: false
+  });
+  const previewRelay = createRelay(backend, {
+    minProtocol: PLAYER_STATE_PREVIEW_PROTOCOL_VERSION,
+    subscribe: (target, dispatch) => target.playerStateOnPreview?.(dispatch),
+    copyOf: previewStateOf,
+    rethrow: true
+  });
   const playerState = {
     getMine: () => statesCall("playerState.getMine", void 0, orNull(playerStateOf)),
     setMine(payload, baseRevision, rawExtra) {
@@ -2218,7 +2311,8 @@ function createGRush(options = {}) {
         listIn("states", playerStateOf),
         MATCHMAKING_PROTOCOL_VERSION
       );
-    }
+    },
+    onPreview: (handler) => previewRelay.subscribe(handler)
   };
   const inbox = {
     send: (to, kind, payload) => mapped(
@@ -2332,17 +2426,7 @@ function createGRush(options = {}) {
         return null;
       }
     },
-    onChange(handler) {
-      if (typeof handler !== "function") return () => {
-      };
-      const entry = { handler };
-      localeHandlers.add(entry);
-      bindLocale();
-      return () => {
-        if (!localeHandlers.delete(entry)) return;
-        bindLocale();
-      };
-    }
+    onChange: (handler) => localeRelay.subscribe(handler)
   };
   const launch = {
     get: () => mapped("launch.get", void 0, required(launchOf), LAUNCH_PROTOCOL_VERSION),
@@ -2356,35 +2440,6 @@ function createGRush(options = {}) {
       }
     }
   };
-  function bindLocale() {
-    const active = backend();
-    const target = localeHandlers.size > 0 && active.isAvailable() && active.protocolVersion() >= LOCALE_PROTOCOL_VERSION ? active : null;
-    if ((localeBinding?.backend ?? null) === target) return;
-    const previous = localeBinding;
-    localeBinding = null;
-    previous?.off();
-    if (!target) return;
-    let off = null;
-    try {
-      off = target.localeOnChange?.(dispatchLocale);
-    } catch {
-    }
-    localeBinding = { backend: target, off: typeof off === "function" ? off : () => {
-    } };
-  }
-  function dispatchLocale(raw) {
-    if (!localeOf(raw)) return;
-    for (const entry of [...localeHandlers]) {
-      if (!localeHandlers.has(entry)) continue;
-      try {
-        entry.handler(localeOf(raw));
-      } catch (error) {
-        queueMicrotask(() => {
-          throw error;
-        });
-      }
-    }
-  }
   function analyticsBackend() {
     const active = backend();
     if (!active.isAvailable() || active.protocolVersion() < ANALYTICS_PROTOCOL_VERSION) return null;
@@ -2469,7 +2524,8 @@ function createGRush(options = {}) {
       currentRoom = null;
       previous?.leave();
       selection = settings.backend;
-      bindLocale();
+      localeRelay.bind();
+      previewRelay.bind();
     },
     isAvailable() {
       const active = backend();
@@ -2488,6 +2544,66 @@ function createGRush(options = {}) {
     analytics,
     net,
     mock: mockBackend.controls
+  };
+}
+function previewStateOf(raw) {
+  try {
+    return playerStateOf(structuredClone(raw));
+  } catch {
+    return null;
+  }
+}
+function createRelay(backend, { minProtocol, subscribe, copyOf, rethrow }) {
+  const handlers = /* @__PURE__ */ new Set();
+  let binding = null;
+  function bind() {
+    const active = backend();
+    const target = handlers.size > 0 && active.isAvailable() && active.protocolVersion() >= minProtocol ? active : null;
+    if ((binding?.backend ?? null) === target) return;
+    const previous = binding;
+    binding = null;
+    previous?.off();
+    if (!target) return;
+    let off = null;
+    try {
+      off = subscribe(target, dispatch);
+    } catch {
+    }
+    binding = { backend: target, off: typeof off === "function" ? off : () => {
+    } };
+  }
+  function dispatch(raw) {
+    if (!copyOf(raw)) return;
+    let first = null;
+    for (const entry of [...handlers]) {
+      if (!handlers.has(entry)) continue;
+      try {
+        entry.handler(copyOf(raw));
+      } catch (error) {
+        if (rethrow && !first) {
+          first = { error };
+          continue;
+        }
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+    if (first) throw first.error;
+  }
+  return {
+    bind,
+    subscribe(handler) {
+      if (typeof handler !== "function") return () => {
+      };
+      const entry = { handler };
+      handlers.add(entry);
+      bind();
+      return () => {
+        if (!handlers.delete(entry)) return;
+        bind();
+      };
+    }
   };
 }
 function pageParams(key, options, names) {

@@ -1,6 +1,6 @@
 {
   "name": "grush-sdk-js",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "description": "GameRush GameAPI for plain HTML/JavaScript games",
   "type": "module",

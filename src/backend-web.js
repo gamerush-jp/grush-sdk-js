@@ -123,6 +123,11 @@ export function createWebBackend() {
       const unsubscribe = runtimeApi("Locale")?.onChange?.(handler);
       return typeof unsubscribe === "function" ? unsubscribe : () => {};
     },
+    // The runtime holds one handler and replaces it on the next call, so sdk.js registers only once.
+    playerStateOnPreview(handler) {
+      const unsubscribe = runtimeApi("PlayerState")?.onPreview?.(handler);
+      return typeof unsubscribe === "function" ? unsubscribe : () => {};
+    },
     launchCurrent: () => runtimeApi("Launch")?.current?.() ?? null,
     analyticsAvailable: () => runtimeApi("Analytics")?.isAvailable?.() === true,
     logAnalytics: (kind, params) => runtimeApi("Analytics")?.log?.(kind, params) === true,

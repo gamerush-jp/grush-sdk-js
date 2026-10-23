@@ -161,7 +161,7 @@ test("cloud save round-trips and guests get signInRequired", async () => {
 
 test("a guest's local save moves to the cloud after signing in", async () => {
   sdk.mock.reset();
-  assert.equal(sdk.protocolVersion(), 9);
+  assert.equal(sdk.protocolVersion(), 10);
   sdk.mock.config.signedIn = false;
   const local = { fallback: "local" };
   assert.equal((await sdk.cloudSave.load("default", local)).value, null);

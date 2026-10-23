@@ -1,4 +1,9 @@
-import GRush, { createGRush, type GRushMessage, type GRushRoom } from "../grush-sdk";
+import GRush, {
+  createGRush,
+  type GRushMessage,
+  type GRushRoom,
+  type JsonValue,
+} from "../grush-sdk";
 
 async function useSdk(): Promise<void> {
   const submitted = await GRush.leaderboards.submit("score", 10, { operationId: "run-1" });
@@ -89,6 +94,13 @@ async function useSdk(): Promise<void> {
   void ratings;
   await GRush.playerState.setMine({ level: 3 }, undefined, { rating: 1000 });
   await GRush.playerState.setMine({ level: 3 }, 2, { rating: null });
+  const stopPreview: () => void = GRush.playerState.onPreview((state) => {
+    const previewRating: number | null = state.rating;
+    const previewPayload: JsonValue = state.payload;
+    void previewRating;
+    void previewPayload;
+  });
+  stopPreview();
 
   const sent = await GRush.inbox.send("p2", "result", { stage: 3, win: true, items: ["gem"] });
   const delivered: boolean = sent.ok && sent.value;
@@ -143,6 +155,10 @@ async function useSdk(): Promise<void> {
   if (listing) local.mock.expireTrade(listing.id);
   local.mock.config.confirmTradeReport = false;
   local.mock.definePlayerState("p9", { level: 1 }, { rating: 1200 });
+  const previewed: boolean = local.mock.previewPlayerState("p9", { level: 1 }, { rating: 1200 });
+  void previewed;
+  // @ts-expect-error a preview payload is an object.
+  local.mock.previewPlayerState("p9", [1]);
   const raised: boolean = local.mock.raiseRoomError("rateLimited", "m");
   void raised;
   local.mock.config.shareStatus = "cancelled";
