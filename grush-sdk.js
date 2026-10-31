@@ -458,6 +458,60 @@
     }
   }
 
+  // src/result.js
+  var CODES = Object.freeze({
+    unsupported: "unsupported",
+    unavailable: "unavailable",
+    timeout: "timeout",
+    rateLimited: "rateLimited",
+    signInRequired: "signInRequired",
+    consentDeclined: "consentDeclined",
+    invalidParams: "invalidParams",
+    conflict: "conflict",
+    internal: "internal"
+  });
+  var PASS_THROUGH_CODES = new Set(Object.values(CODES));
+  function ok(value) {
+    return { ok: true, value, code: "", message: "" };
+  }
+  function failure(code, message) {
+    return { ok: false, value: null, code, message };
+  }
+  function unsupported() {
+    return failure(CODES.unsupported, "GameRush GameAPI is not available here.");
+  }
+  function failureFromError(error) {
+    const rawCode = error && typeof error.code === "string" ? error.code : "";
+    const code = rawCode === "unsupportedMethod" ? CODES.unsupported : PASS_THROUGH_CODES.has(rawCode) ? rawCode : CODES.internal;
+    const result = failure(code, messageOf(error, "GameRush API call failed."));
+    if (error && typeof error.retryAfterMs === "number") result.retryAfterMs = error.retryAfterMs;
+    return result;
+  }
+  var CLOUD_SAVE_STATUS_CODES = /* @__PURE__ */ new Map([
+    [0, CODES.unavailable],
+    [400, CODES.invalidParams],
+    [401, CODES.signInRequired],
+    [409, CODES.conflict],
+    [413, CODES.invalidParams],
+    [429, CODES.rateLimited]
+  ]);
+  function failureFromCloudSaveError(error) {
+    const status = error && typeof error.status === "number" ? error.status : null;
+    const message = messageOf(error, "Cloud save failed.");
+    if (status === null) {
+      if (/timed out/i.test(message)) return failure(CODES.timeout, message);
+      if (/only available inside GameRush|frame was destroyed/i.test(message)) {
+        return failure(CODES.unavailable, message);
+      }
+      return failure(CODES.invalidParams, message);
+    }
+    if (status === 409 && /owner mismatch/i.test(message)) return failure(CODES.internal, message);
+    return failure(CLOUD_SAVE_STATUS_CODES.get(status) ?? CODES.internal, message);
+  }
+  function messageOf(error, fallback) {
+    return error && typeof error.message === "string" && error.message ? error.message : fallback;
+  }
+
   // src/mock-net.js
   var MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
   var ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
@@ -591,10 +645,12 @@
       leave();
       const mode = params.mode ?? "default";
       const requested = params.roomCode;
-      if (!MODE_PATTERN.test(mode)) return null;
-      if (requested !== void 0 && !ROOM_CODE_PATTERN.test(requested)) return null;
+      if (!MODE_PATTERN.test(mode)) return failure(CODES.invalidParams, "Invalid mode.");
+      if (requested !== void 0 && !ROOM_CODE_PATTERN.test(requested)) {
+        return failure(CODES.invalidParams, "Invalid room code.");
+      }
       const index = nextFreeIndex();
-      if (index < 0) return null;
+      if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
       roomCode = requested ? requested.toUpperCase() : roomCode || "MOCKROOM";
       const peers = [...members.keys()].map(peerWire);
       localIndex = index;
@@ -617,7 +673,7 @@
         transport: "ws",
         serverTimeMs: Date.now()
       };
-      return { source, info };
+      return ok({ source, info });
     }
     function raiseError(code, message) {
       if (localIndex < 0) return false;
@@ -641,60 +697,6 @@
       text: () => decodeText(message.payload),
       json: () => decodeJson(message.payload)
     };
-  }
-
-  // src/result.js
-  var CODES = Object.freeze({
-    unsupported: "unsupported",
-    unavailable: "unavailable",
-    timeout: "timeout",
-    rateLimited: "rateLimited",
-    signInRequired: "signInRequired",
-    consentDeclined: "consentDeclined",
-    invalidParams: "invalidParams",
-    conflict: "conflict",
-    internal: "internal"
-  });
-  var PASS_THROUGH_CODES = new Set(Object.values(CODES));
-  function ok(value) {
-    return { ok: true, value, code: "", message: "" };
-  }
-  function failure(code, message) {
-    return { ok: false, value: null, code, message };
-  }
-  function unsupported() {
-    return failure(CODES.unsupported, "GameRush GameAPI is not available here.");
-  }
-  function failureFromError(error) {
-    const rawCode = error && typeof error.code === "string" ? error.code : "";
-    const code = rawCode === "unsupportedMethod" ? CODES.unsupported : PASS_THROUGH_CODES.has(rawCode) ? rawCode : CODES.internal;
-    const result = failure(code, messageOf(error, "GameRush API call failed."));
-    if (error && typeof error.retryAfterMs === "number") result.retryAfterMs = error.retryAfterMs;
-    return result;
-  }
-  var CLOUD_SAVE_STATUS_CODES = /* @__PURE__ */ new Map([
-    [0, CODES.unavailable],
-    [400, CODES.invalidParams],
-    [401, CODES.signInRequired],
-    [409, CODES.conflict],
-    [413, CODES.invalidParams],
-    [429, CODES.rateLimited]
-  ]);
-  function failureFromCloudSaveError(error) {
-    const status = error && typeof error.status === "number" ? error.status : null;
-    const message = messageOf(error, "Cloud save failed.");
-    if (status === null) {
-      if (/timed out/i.test(message)) return failure(CODES.timeout, message);
-      if (/only available inside GameRush|frame was destroyed/i.test(message)) {
-        return failure(CODES.unavailable, message);
-      }
-      return failure(CODES.invalidParams, message);
-    }
-    if (status === 409 && /owner mismatch/i.test(message)) return failure(CODES.internal, message);
-    return failure(CLOUD_SAVE_STATUS_CODES.get(status) ?? CODES.internal, message);
-  }
-  function messageOf(error, fallback) {
-    return error && typeof error.message === "string" && error.message ? error.message : fallback;
   }
 
   // src/mock-social.js
@@ -1607,11 +1609,7 @@
       "share.getAvailability": () => ok(config.shareAvailable === true),
       "locale.get": () => ok(mockLocale(config)),
       "launch.get": () => ok(mockLaunch(config)),
-      "net.join": (p) => {
-        const joined = net.join(p);
-        if (joined === null) return failure(CODES.internal, "Failed to join a room.");
-        return ok(joined);
-      }
+      "net.join": (p) => net.join(p)
     };
     const controls = {
       config,

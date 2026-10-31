@@ -140,8 +140,25 @@ test("mock rooms follow the server's room code rules", async () => {
   sdk.mock.reset();
   assert.equal((await sdk.net.join({ roomCode: "abcd" })).value.roomCode, "ABCD");
   assert.equal((await sdk.net.join({ roomCode: "WXYZ" })).value.roomCode, "WXYZ");
-  assert.equal((await sdk.net.join({ roomCode: "my room" })).code, "internal");
-  assert.equal((await sdk.net.join({ mode: "bad mode" })).code, "internal");
+  assert.equal((await sdk.net.join({ roomCode: "my room" })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ roomCode: "ABC" })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ roomCode: "ABCDEFGHIJKLM" })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ roomCode: "ABCD\n" })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ mode: "bad mode" })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ mode: "m".repeat(33) })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ mode: "ranked:v2.1_a-b" })).ok, true);
+  assert.equal((await sdk.net.join({ mode: "m".repeat(32), roomCode: "A1B2C3D4E5F6" })).ok, true);
+  assert.equal(sdk.net.room.roomCode, "A1B2C3D4E5F6");
+});
+
+test("a full mock room refuses to join with unavailable", async () => {
+  sdk.mock.reset();
+  sdk.mock.config.maxPeers = 2;
+  sdk.mock.addPeer("Bot");
+  sdk.mock.addPeer("Bot 2");
+  const refused = await sdk.net.join();
+  assert.equal(refused.code, "unavailable");
+  assert.equal(sdk.net.room, null);
 });
 
 test("switching backends leaves the current room instead of abandoning it", async () => {

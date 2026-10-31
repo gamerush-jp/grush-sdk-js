@@ -333,6 +333,8 @@ if (GRush.backend === "mock") {
 
 `GRush.mock.raiseRoomError(code, message)` は、自分がいる部屋に `error` を届ける（本番と同じく非同期で、部屋は閉じない）。部屋にいなければ `false` を返す。
 
+モックの `join` は GameRush と同じく、`mode`（英数字と `._:-` の1〜32文字）か `roomCode`（英数字の4〜12文字）の形が違えば `invalidParams` で失敗する。部屋が `maxPeers` 人で埋まっていれば `unavailable` で失敗する。
+
 モックは実サーバと同じ縛り（宣言していない key への投稿・値域外・int の枠への小数・公開プレイヤー状態の 4KB と base64 らしい文字列・ゲストのクラウドセーブと通報・部屋コードの形式）で弾く。有効プレイ 10 秒未満の投稿と投稿頻度の上限は再現しない。`signedIn: false` のとき `fallback: "local"` 付きのクラウドセーブは、モックの中の端末の保存先に読み書きし（`reset()` で消える）、`signedIn` を `true` に戻すとクラウドへ書けるようになる。共有は確認シートを出さず、`shareStatus`（既定 `"opened"`）をそのまま返す。`launchParams` は GameRush と同じ制限で確かめ、合わなければ `invalidParams`。本文と画像の検査はしないので、弾かれる本文は GameRush 上で確かめる。
 
 アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 10。

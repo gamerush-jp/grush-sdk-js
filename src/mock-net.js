@@ -1,4 +1,5 @@
 import { decodeJson, decodeText, toBytes } from "./bytes.js";
+import { CODES, failure, ok } from "./result.js";
 
 const MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
 const ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
@@ -145,10 +146,14 @@ export function createMockNet(config, localPeerWire) {
     leave();
     const mode = params.mode ?? "default";
     const requested = params.roomCode;
-    if (!MODE_PATTERN.test(mode)) return null;
-    if (requested !== undefined && !ROOM_CODE_PATTERN.test(requested)) return null;
+    // Same codes as GameRush: a malformed mode or room code is the game's to fix, a full room
+    // is worth retrying later.
+    if (!MODE_PATTERN.test(mode)) return failure(CODES.invalidParams, "Invalid mode.");
+    if (requested !== undefined && !ROOM_CODE_PATTERN.test(requested)) {
+      return failure(CODES.invalidParams, "Invalid room code.");
+    }
     const index = nextFreeIndex();
-    if (index < 0) return null;
+    if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
     roomCode = requested ? requested.toUpperCase() : roomCode || "MOCKROOM";
     const peers = [...members.keys()].map(peerWire);
     localIndex = index;
@@ -171,7 +176,7 @@ export function createMockNet(config, localPeerWire) {
       transport: "ws",
       serverTimeMs: Date.now(),
     };
-    return { source, info };
+    return ok({ source, info });
   }
 
   function raiseError(code, message) {

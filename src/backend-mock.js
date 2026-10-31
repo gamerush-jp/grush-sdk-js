@@ -607,11 +607,7 @@ export function createMockBackend(config) {
     "share.getAvailability": () => ok(config.shareAvailable === true),
     "locale.get": () => ok(mockLocale(config)),
     "launch.get": () => ok(mockLaunch(config)),
-    "net.join": (p) => {
-      const joined = net.join(p);
-      if (joined === null) return failure(CODES.internal, "Failed to join a room.");
-      return ok(joined);
-    },
+    "net.join": (p) => net.join(p),
   };
 
   const controls = {
