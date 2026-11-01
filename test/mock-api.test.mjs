@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 
+import { gameJsonError } from "../src/backend-mock.js";
 import { createGRush } from "../src/sdk.js";
 
 let sdk;
@@ -140,6 +141,102 @@ test("player state counts its 4KB limit in UTF-8 bytes, like the server", async 
   assert.equal(JSON.stringify(over).length, 1375);
   assert.equal((await sdk.playerState.setMine(fits)).ok, true);
   assert.equal((await sdk.playerState.setMine(over)).code, "invalidParams");
+});
+
+// A value nested `depth` levels deep: `[]` is 1, `[[]]` is 2. inner, an array, is the innermost level.
+function nested(depth, inner = []) {
+  let value = inner;
+  for (let level = 1; level < depth; level += 1) value = [value];
+  return value;
+}
+
+const LONE_HIGH = String.fromCharCode(0xd83d);
+const LONE_LOW = String.fromCharCode(0xde00);
+const EMOJI = String.fromCodePoint(0x1f600);
+
+test("player state refuses deep nesting and lone surrogates, like the server", async () => {
+  sdk.mock.reset();
+  const setMine = (payload) => sdk.playerState.setMine(payload);
+  assert.equal((await setMine({ a: nested(999) })).ok, true);
+  // Up to 3000 levels the depth passes and the next check speaks. Over 3000 levels the depth is
+  // reported first.
+  assert.equal(
+    (await setMine({ a: nested(2999, [LONE_HIGH]) })).message,
+    "Player state payload must not contain lone surrogates.",
+  );
+  const tooDeep = await setMine({ a: nested(3000, [LONE_HIGH]) });
+  assert.equal(tooDeep.code, "invalidParams");
+  assert.equal(tooDeep.message, "Player state payload is nested too deeply.");
+  assert.equal(
+    (await setMine({ a: nested(3000) })).message,
+    "Player state payload is nested too deeply.",
+  );
+
+  for (const payload of [
+    { name: LONE_HIGH },
+    { name: `a${LONE_LOW}b` },
+    { [`k${LONE_HIGH}`]: 1 },
+    { list: [{ deep: [LONE_LOW] }] },
+  ]) {
+    const result = await setMine(payload);
+    assert.equal(result.code, "invalidParams");
+    assert.equal(result.message, "Player state payload must not contain lone surrogates.");
+  }
+  // A paired surrogate is one character and is kept.
+  const paired = await setMine({ [EMOJI]: `${LONE_HIGH}${LONE_LOW}` });
+  assert.deepEqual(paired.value.payload, { [EMOJI]: EMOJI });
+
+  // A value that contains itself is not JSON, and the walk stops on it.
+  const loop = { level: 1 };
+  loop.self = loop;
+  assert.equal((await setMine(loop)).message, "Player state payload must be JSON.");
+  // A part shared by several places counts once for each, as JSON.stringify writes it.
+  let shared = [0];
+  for (let level = 0; level < 20; level += 1) shared = [shared, shared];
+  assert.equal((await setMine({ shared })).message, "Player state payload must be JSON.");
+});
+
+test("a cloud save refuses deep nesting and lone surrogates, like the server", async () => {
+  sdk.mock.reset();
+  assert.equal((await sdk.cloudSave.save({ a: nested(999) })).ok, true);
+  assert.deepEqual((await sdk.cloudSave.load()).value.payload, { a: nested(999) });
+
+  for (const payload of [
+    LONE_HIGH,
+    [`x${LONE_LOW}`],
+    { [LONE_HIGH]: 1 },
+    { a: { b: LONE_HIGH } },
+  ]) {
+    const result = await sdk.cloudSave.save(payload);
+    assert.equal(result.code, "invalidParams");
+    assert.equal(result.message, "Cloud save payload must not contain lone surrogates.");
+  }
+  assert.equal((await sdk.cloudSave.save({ [EMOJI]: [EMOJI] })).ok, true);
+
+  // A cloud save is measured with JSON.stringify before these checks, and in Node JSON.stringify runs
+  // out of stack a few thousand levels down. The depth limit is checked on its own here.
+  const label = "Cloud save payload";
+  assert.equal(gameJsonError(nested(3000), label), null);
+  assert.equal(
+    gameJsonError(nested(3000, [LONE_HIGH]), label),
+    "Cloud save payload must not contain lone surrogates.",
+  );
+  assert.equal(gameJsonError(nested(3001), label), "Cloud save payload is nested too deeply.");
+  assert.equal(
+    gameJsonError({ a: nested(3000) }, label),
+    "Cloud save payload is nested too deeply.",
+  );
+  // A deep value with a lone surrogate is reported as too deep, as on the server.
+  assert.equal(
+    gameJsonError(nested(3001, [LONE_HIGH]), label),
+    "Cloud save payload is nested too deeply.",
+  );
+
+  // A save on the device does not go to GameRush, so these limits do not apply to it.
+  sdk.mock.config.signedIn = false;
+  const local = { fallback: "local" };
+  assert.equal((await sdk.cloudSave.save({ a: LONE_HIGH }, "default", local)).ok, true);
+  assert.equal((await sdk.cloudSave.save({ a: LONE_HIGH })).code, "signInRequired");
 });
 
 test("cloud save round-trips and guests get signInRequired", async () => {

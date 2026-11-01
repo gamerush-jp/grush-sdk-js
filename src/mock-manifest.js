@@ -7,6 +7,9 @@ const MAX_LEADERBOARDS = 20;
 const MAX_TITLE_LENGTH = 60;
 const KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 const LINE_BREAKING_OR_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]+/gu;
+// A lone surrogate (half of a UTF-16 pair). With the u flag a whole pair is one code point, so only
+// the unpaired halves match.
+const LONE_SURROGATE = /\p{Cs}/gu;
 const TOP_LEVEL_FIELDS = new Set(["$schema", "leaderboards"]);
 const ENTRY_FIELDS = new Set([
   "key",
@@ -75,8 +78,12 @@ function readEntry(item, at, seen) {
       return invalidField(`${at}.${field}`);
     }
   }
+  // Like GameRush, lone surrogates are dropped first, so control characters on both sides of one
+  // collapse into a single space.
   const title =
-    typeof item.title === "string" ? item.title.replace(LINE_BREAKING_OR_CONTROL, " ").trim() : "";
+    typeof item.title === "string"
+      ? item.title.replace(LONE_SURROGATE, "").replace(LINE_BREAKING_OR_CONTROL, " ").trim()
+      : "";
   if (title.length < 1 || title.length > MAX_TITLE_LENGTH) return invalidField(`${at}.title`);
   for (const [field, choices] of Object.entries(CHOICES)) {
     if (!choices.includes(item[field])) return invalidField(`${at}.${field}`);

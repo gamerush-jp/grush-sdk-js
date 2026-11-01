@@ -318,6 +318,7 @@
   var MAX_TITLE_LENGTH = 60;
   var KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
   var LINE_BREAKING_OR_CONTROL2 = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]+/gu;
+  var LONE_SURROGATE2 = /\p{Cs}/gu;
   var TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set(["$schema", "leaderboards"]);
   var ENTRY_FIELDS = /* @__PURE__ */ new Set([
     "key",
@@ -378,7 +379,7 @@
         return invalidField(`${at}.${field}`);
       }
     }
-    const title = typeof item.title === "string" ? item.title.replace(LINE_BREAKING_OR_CONTROL2, " ").trim() : "";
+    const title = typeof item.title === "string" ? item.title.replace(LONE_SURROGATE2, "").replace(LINE_BREAKING_OR_CONTROL2, " ").trim() : "";
     if (title.length < 1 || title.length > MAX_TITLE_LENGTH) return invalidField(`${at}.title`);
     for (const [field, choices] of Object.entries(CHOICES)) {
       if (!choices.includes(item[field])) return invalidField(`${at}.${field}`);
@@ -1126,6 +1127,65 @@
     if (value && typeof value === "object") return Object.values(value).some(containsOpaqueString);
     return false;
   }
+  var GAME_JSON_MAX_DEPTH = 3e3;
+  var GAME_JSON_MAX_NODES = 5e5;
+  var HAS_LONE_SURROGATE = /\p{Cs}/u;
+  function gameJsonWalkable(value) {
+    const leave = /* @__PURE__ */ Symbol("leave");
+    const ancestors = /* @__PURE__ */ new Set();
+    const stack = [value];
+    let visited = 0;
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (current === leave) {
+        ancestors.delete(stack.pop());
+        continue;
+      }
+      visited += 1;
+      if (visited > GAME_JSON_MAX_NODES) return false;
+      if (current === null || typeof current !== "object") continue;
+      if (ancestors.has(current)) return false;
+      ancestors.add(current);
+      stack.push(current, leave);
+      for (const item of Array.isArray(current) ? current : Object.values(current)) stack.push(item);
+    }
+    return true;
+  }
+  function gameJsonTooDeep(value) {
+    const stack = [{ node: value, depth: 0 }];
+    while (stack.length > 0) {
+      const { node, depth } = stack.pop();
+      if (node === null || typeof node !== "object") continue;
+      if (depth + 1 > GAME_JSON_MAX_DEPTH) return true;
+      for (const item of Array.isArray(node) ? node : Object.values(node)) {
+        stack.push({ node: item, depth: depth + 1 });
+      }
+    }
+    return false;
+  }
+  function gameJsonHasLoneSurrogate(value) {
+    const stack = [value];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (typeof current === "string") {
+        if (HAS_LONE_SURROGATE.test(current)) return true;
+      } else if (Array.isArray(current)) {
+        for (const item of current) stack.push(item);
+      } else if (current !== null && typeof current === "object") {
+        for (const [key, item] of Object.entries(current)) {
+          if (HAS_LONE_SURROGATE.test(key)) return true;
+          stack.push(item);
+        }
+      }
+    }
+    return false;
+  }
+  function gameJsonError(value, label) {
+    if (!gameJsonWalkable(value)) return `${label} must be JSON.`;
+    if (gameJsonTooDeep(value)) return `${label} is nested too deeply.`;
+    if (gameJsonHasLoneSurrogate(value)) return `${label} must not contain lone surrogates.`;
+    return null;
+  }
   function mockLaunch(config) {
     const params = config.launchParams;
     if (!params || typeof params !== "object") return { params: {} };
@@ -1428,6 +1488,8 @@
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         return invalid2("Player state payload must be a JSON object.");
       }
+      const jsonError = gameJsonError(payload, "Player state payload");
+      if (jsonError) return invalid2(jsonError);
       if (jsonBytes(payload) > PLAYER_STATE_MAX_BYTES) return invalid2("Player state is too large.");
       if (containsOpaqueString(payload)) {
         return invalid2("Player state must not contain opaque encoded strings.");
@@ -1501,6 +1563,8 @@
         localSaves.set(key, save2);
         return ok(save2);
       }
+      const jsonError = gameJsonError(payload, "Cloud save payload");
+      if (jsonError) return invalid2(jsonError);
       const current = cloudSaves.get(key);
       const revision = current ? current.revision : 0;
       if (typeof baseRevision === "number" && baseRevision !== revision) {

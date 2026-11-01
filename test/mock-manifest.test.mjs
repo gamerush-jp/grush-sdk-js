@@ -144,6 +144,22 @@ test("the manifest parser checks in the upload's order and reads bytes as strict
   );
 });
 
+test("the title drops lone surrogates before collapsing and counting, as GameRush does", () => {
+  const high = String.fromCharCode(0xd83d);
+  const low = String.fromCharCode(0xde00);
+  const title = (value) =>
+    parseLeaderboardManifest({ leaderboards: [{ ...HIGH_SCORE, title: value }] });
+  assert.equal(title(high).error, "grush.json has an invalid value: leaderboards[0].title");
+  assert.equal(title(`${high}スコア`).leaderboards[0].title, "スコア");
+  assert.equal(title(`a\n${low}\tb`).leaderboards[0].title, "a b");
+  assert.equal(title(`${"あ".repeat(60)}${high}`).leaderboards[0].title, "あ".repeat(60));
+  assert.equal(title(`${high}${low}`).leaderboards[0].title, String.fromCodePoint(0x1f600));
+  // Read from the file, the escape becomes the same lone surrogate.
+  const text = JSON.stringify({ leaderboards: [{ ...HIGH_SCORE, title: `${high}スコア` }] });
+  assert.match(text, /\\ud83d/);
+  assert.equal(parseLeaderboardManifest(text).leaderboards[0].title, "スコア");
+});
+
 test("loadLeaderboards declares the boards and reports mistakes as invalidParams", async () => {
   const loaded = sdk.mock.loadLeaderboards(JSON.stringify({ leaderboards: [HIGH_SCORE] }));
   assert.deepEqual(loaded, { ok: true, value: ["high_score"], code: "", message: "" });
