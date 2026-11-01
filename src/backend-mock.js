@@ -473,6 +473,12 @@ export function createMockBackend(config) {
     if (!SLOT_PATTERN.test(key)) return invalid("Invalid cloud save slot.");
     if (payload === undefined || payload === null)
       return invalid("Cloud save payload is required.");
+    // A save that goes to GameRush is checked in GameRush's order: whether it is JSON, its depth, lone
+    // surrogates, then its size. A device save keeps the payload as it is, so only its size is checked.
+    if (config.signedIn) {
+      const jsonError = gameJsonError(payload, "Cloud save payload");
+      if (jsonError) return invalid(jsonError);
+    }
     if (jsonBytes(payload) > CLOUD_SAVE_MAX_BYTES)
       return invalid("Cloud save payload is too large.");
     const mode = fallbackOf(fallback);
@@ -493,9 +499,6 @@ export function createMockBackend(config) {
       localSaves.set(key, save);
       return ok(save);
     }
-    // Only a save that goes to GameRush meets these limits. A device save keeps the payload as it is.
-    const jsonError = gameJsonError(payload, "Cloud save payload");
-    if (jsonError) return invalid(jsonError);
     const current = cloudSaves.get(key);
     const revision = current ? current.revision : 0;
     if (typeof baseRevision === "number" && baseRevision !== revision) {

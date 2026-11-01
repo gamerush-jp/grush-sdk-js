@@ -1558,6 +1558,10 @@
       if (!SLOT_PATTERN.test(key)) return invalid2("Invalid cloud save slot.");
       if (payload === void 0 || payload === null)
         return invalid2("Cloud save payload is required.");
+      if (config.signedIn) {
+        const jsonError = gameJsonError(payload, "Cloud save payload");
+        if (jsonError) return invalid2(jsonError);
+      }
       if (jsonBytes(payload) > CLOUD_SAVE_MAX_BYTES)
         return invalid2("Cloud save payload is too large.");
       const mode = fallbackOf(fallback);
@@ -1577,8 +1581,6 @@
         localSaves.set(key, save2);
         return ok(save2);
       }
-      const jsonError = gameJsonError(payload, "Cloud save payload");
-      if (jsonError) return invalid2(jsonError);
       const current = cloudSaves.get(key);
       const revision = current ? current.revision : 0;
       if (typeof baseRevision === "number" && baseRevision !== revision) {

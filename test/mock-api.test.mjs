@@ -213,24 +213,26 @@ test("a cloud save refuses deep nesting and lone surrogates, like the server", a
   }
   assert.equal((await sdk.cloudSave.save({ [EMOJI]: [EMOJI] })).ok, true);
 
-  // A cloud save is measured with JSON.stringify before these checks, and in Node JSON.stringify runs
-  // out of stack a few thousand levels down. The depth limit is checked on its own here.
-  const label = "Cloud save payload";
-  assert.equal(gameJsonError(nested(3000), label), null);
+  // GameRush's order: whether it is JSON, its depth, lone surrogates, then its size.
+  const message = async (payload) => (await sdk.cloudSave.save(payload)).message;
+  const loop = { coins: 1 };
+  loop.self = loop;
+  assert.equal(await message(loop), "Cloud save payload must be JSON.");
+  assert.equal(await message(nested(3001)), "Cloud save payload is nested too deeply.");
+  assert.equal(await message({ a: nested(3000) }), "Cloud save payload is nested too deeply.");
+  // Up to 3000 levels the depth passes and the next check speaks.
   assert.equal(
-    gameJsonError(nested(3000, [LONE_HIGH]), label),
+    await message(nested(3000, [LONE_HIGH])),
     "Cloud save payload must not contain lone surrogates.",
-  );
-  assert.equal(gameJsonError(nested(3001), label), "Cloud save payload is nested too deeply.");
-  assert.equal(
-    gameJsonError({ a: nested(3000) }, label),
-    "Cloud save payload is nested too deeply.",
   );
   // A deep value with a lone surrogate is reported as too deep, as on the server.
   assert.equal(
-    gameJsonError(nested(3001, [LONE_HIGH]), label),
+    await message(nested(3001, [LONE_HIGH])),
     "Cloud save payload is nested too deeply.",
   );
+  // The mock measures and stores a save with JSON.stringify and structuredClone, which in Node run out of
+  // stack a few thousand levels down. So a valid 3000-level value is checked against the limit on its own.
+  assert.equal(gameJsonError(nested(3000), "Cloud save payload"), null);
 
   // A save on the device does not go to GameRush, so these limits do not apply to it.
   sdk.mock.config.signedIn = false;
