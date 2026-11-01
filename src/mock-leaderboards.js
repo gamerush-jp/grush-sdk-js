@@ -1,3 +1,5 @@
+import { gameJsonError, operationIdError } from "./game-json.js";
+
 const PERIODS = new Set(["all_time", "daily", "weekly", "monthly"]);
 
 function clamp(value, fallback, max) {
@@ -132,13 +134,12 @@ export function createMockLeaderboards(selfIdentity, now = () => new Date()) {
     return better ? value : current;
   }
 
-  function submit(key, value, metadata) {
+  // The checks run in the same order as on GameRush: the board, the value, metadata, operationId, then
+  // the declared range.
+  function submit(key, value, metadata, operationId) {
     const found = playable(key);
     if (found.error) return found;
     const { board } = found;
-    if (board.requireRange && board.minValue === null) {
-      return { error: "This leaderboard declares no minValue / maxValue, so it accepts no score." };
-    }
     if (typeof value !== "number" || !Number.isFinite(value)) {
       return { error: "Score must be a finite number." };
     }
@@ -147,6 +148,15 @@ export function createMockLeaderboards(selfIdentity, now = () => new Date()) {
     }
     if (board.valueType === "duration_ms" && value < 0) {
       return { error: "Duration must not be negative." };
+    }
+    if (metadata !== undefined && metadata !== null) {
+      const metadataError = gameJsonError(metadata, "Metadata");
+      if (metadataError) return { error: metadataError };
+    }
+    const idError = operationIdError(operationId);
+    if (idError) return { error: idError };
+    if (board.requireRange && board.minValue === null) {
+      return { error: "This leaderboard declares no minValue / maxValue, so it accepts no score." };
     }
     const belowMin = board.minValue !== null && value < board.minValue;
     const aboveMax = board.maxValue !== null && value > board.maxValue;

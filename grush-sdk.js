@@ -118,6 +118,73 @@
     return sanitizeEconomy(raw, fields.value);
   }
 
+  // src/game-json.js
+  var GAME_JSON_MAX_DEPTH = 3e3;
+  var GAME_JSON_MAX_NODES = 5e5;
+  var OPERATION_ID_MAX_LENGTH = 100;
+  var HAS_LONE_SURROGATE = /\p{Cs}/u;
+  function gameJsonWalkable(value) {
+    const leave = /* @__PURE__ */ Symbol("leave");
+    const ancestors = /* @__PURE__ */ new Set();
+    const stack = [value];
+    let visited = 0;
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (current === leave) {
+        ancestors.delete(stack.pop());
+        continue;
+      }
+      visited += 1;
+      if (visited > GAME_JSON_MAX_NODES) return false;
+      if (current === null || typeof current !== "object") continue;
+      if (ancestors.has(current)) return false;
+      ancestors.add(current);
+      stack.push(current, leave);
+      for (const item of Array.isArray(current) ? current : Object.values(current)) stack.push(item);
+    }
+    return true;
+  }
+  function gameJsonTooDeep(value) {
+    const stack = [{ node: value, depth: 0 }];
+    while (stack.length > 0) {
+      const { node, depth } = stack.pop();
+      if (node === null || typeof node !== "object") continue;
+      if (depth + 1 > GAME_JSON_MAX_DEPTH) return true;
+      for (const item of Array.isArray(node) ? node : Object.values(node)) {
+        stack.push({ node: item, depth: depth + 1 });
+      }
+    }
+    return false;
+  }
+  function gameJsonHasLoneSurrogate(value) {
+    const stack = [value];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (typeof current === "string") {
+        if (HAS_LONE_SURROGATE.test(current)) return true;
+      } else if (Array.isArray(current)) {
+        for (const item of current) stack.push(item);
+      } else if (current !== null && typeof current === "object") {
+        for (const [key, item] of Object.entries(current)) {
+          if (HAS_LONE_SURROGATE.test(key)) return true;
+          stack.push(item);
+        }
+      }
+    }
+    return false;
+  }
+  function gameJsonError(value, label) {
+    if (!gameJsonWalkable(value)) return `${label} must be JSON.`;
+    if (gameJsonTooDeep(value)) return `${label} is nested too deeply.`;
+    if (gameJsonHasLoneSurrogate(value)) return `${label} must not contain lone surrogates.`;
+    return null;
+  }
+  function operationIdError(value) {
+    if (typeof value !== "string" || value.length === 0) return null;
+    if (value.length > OPERATION_ID_MAX_LENGTH) return null;
+    return HAS_LONE_SURROGATE.test(value) ? "Operation ID must not contain lone surrogates." : null;
+  }
+
   // src/mock-leaderboards.js
   var PERIODS = /* @__PURE__ */ new Set(["all_time", "daily", "weekly", "monthly"]);
   function clamp(value, fallback, max) {
@@ -228,13 +295,10 @@
       const better = board.sort === "asc" ? value < current2 : value > current2;
       return better ? value : current2;
     }
-    function submit(key, value, metadata) {
+    function submit(key, value, metadata, operationId) {
       const found = playable(key);
       if (found.error) return found;
       const { board } = found;
-      if (board.requireRange && board.minValue === null) {
-        return { error: "This leaderboard declares no minValue / maxValue, so it accepts no score." };
-      }
       if (typeof value !== "number" || !Number.isFinite(value)) {
         return { error: "Score must be a finite number." };
       }
@@ -243,6 +307,15 @@
       }
       if (board.valueType === "duration_ms" && value < 0) {
         return { error: "Duration must not be negative." };
+      }
+      if (metadata !== void 0 && metadata !== null) {
+        const metadataError = gameJsonError(metadata, "Metadata");
+        if (metadataError) return { error: metadataError };
+      }
+      const idError = operationIdError(operationId);
+      if (idError) return { error: idError };
+      if (board.requireRange && board.minValue === null) {
+        return { error: "This leaderboard declares no minValue / maxValue, so it accepts no score." };
       }
       const belowMin = board.minValue !== null && value < board.minValue;
       const aboveMax = board.maxValue !== null && value > board.maxValue;
@@ -1127,65 +1200,6 @@
     if (value && typeof value === "object") return Object.values(value).some(containsOpaqueString);
     return false;
   }
-  var GAME_JSON_MAX_DEPTH = 3e3;
-  var GAME_JSON_MAX_NODES = 5e5;
-  var HAS_LONE_SURROGATE = /\p{Cs}/u;
-  function gameJsonWalkable(value) {
-    const leave = /* @__PURE__ */ Symbol("leave");
-    const ancestors = /* @__PURE__ */ new Set();
-    const stack = [value];
-    let visited = 0;
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (current === leave) {
-        ancestors.delete(stack.pop());
-        continue;
-      }
-      visited += 1;
-      if (visited > GAME_JSON_MAX_NODES) return false;
-      if (current === null || typeof current !== "object") continue;
-      if (ancestors.has(current)) return false;
-      ancestors.add(current);
-      stack.push(current, leave);
-      for (const item of Array.isArray(current) ? current : Object.values(current)) stack.push(item);
-    }
-    return true;
-  }
-  function gameJsonTooDeep(value) {
-    const stack = [{ node: value, depth: 0 }];
-    while (stack.length > 0) {
-      const { node, depth } = stack.pop();
-      if (node === null || typeof node !== "object") continue;
-      if (depth + 1 > GAME_JSON_MAX_DEPTH) return true;
-      for (const item of Array.isArray(node) ? node : Object.values(node)) {
-        stack.push({ node: item, depth: depth + 1 });
-      }
-    }
-    return false;
-  }
-  function gameJsonHasLoneSurrogate(value) {
-    const stack = [value];
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (typeof current === "string") {
-        if (HAS_LONE_SURROGATE.test(current)) return true;
-      } else if (Array.isArray(current)) {
-        for (const item of current) stack.push(item);
-      } else if (current !== null && typeof current === "object") {
-        for (const [key, item] of Object.entries(current)) {
-          if (HAS_LONE_SURROGATE.test(key)) return true;
-          stack.push(item);
-        }
-      }
-    }
-    return false;
-  }
-  function gameJsonError(value, label) {
-    if (!gameJsonWalkable(value)) return `${label} must be JSON.`;
-    if (gameJsonTooDeep(value)) return `${label} is nested too deeply.`;
-    if (gameJsonHasLoneSurrogate(value)) return `${label} must not contain lone surrogates.`;
-    return null;
-  }
   function mockLaunch(config) {
     const params = config.launchParams;
     if (!params || typeof params !== "object") return { params: {} };
@@ -1634,7 +1648,7 @@
         return ok(playerWire());
       },
       "leaderboard.list": () => ok(leaderboards.list()),
-      "leaderboard.submit": (p) => fromBoard(leaderboards.submit(p.key, p.value, p.metadata), (o) => o.result),
+      "leaderboard.submit": (p) => fromBoard(leaderboards.submit(p.key, p.value, p.metadata, p.operationId), (o) => o.result),
       "leaderboard.top": (p) => fromBoard(leaderboards.page(p.key, p, false), (o) => o.page),
       "leaderboard.aroundMe": (p) => fromBoard(leaderboards.page(p.key, p, true), (o) => o.page),
       "leaderboard.friends": () => failure(CODES.consentDeclined, "Friend leaderboards require per-game friend consent."),

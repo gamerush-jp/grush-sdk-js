@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 
-import { gameJsonError } from "../src/backend-mock.js";
+import { gameJsonError } from "../src/game-json.js";
 import { createGRush } from "../src/sdk.js";
 
 let sdk;
@@ -238,6 +238,44 @@ test("a cloud save refuses deep nesting and lone surrogates, like the server", a
   assert.equal((await sdk.cloudSave.save({ a: LONE_HIGH }, "default", local)).ok, true);
   assert.equal((await sdk.cloudSave.save({ a: LONE_HIGH })).code, "signInRequired");
 });
+
+test("a score's metadata and operationId are checked like GameRush, before the range", async () => {
+  sdk.mock.reset();
+  sdk.mock.defineLeaderboard("score", { minValue: 0, maxValue: 100 });
+  const submit = (metadata, operationId) =>
+    sdk.leaderboards.submit("score", 10, { metadata, operationId });
+  assert.equal((await submit({ a: nested(2999) })).ok, true);
+  assert.equal((await submit({ a: nested(2999, [LONE_HIGH]) })).message, LONE_METADATA);
+  assert.equal((await submit({ a: nested(3000) })).message, "Metadata is nested too deeply.");
+  for (const metadata of [LONE_HIGH, { [LONE_LOW]: 1 }, [{ a: `x${LONE_HIGH}` }]]) {
+    const result = await submit(metadata);
+    assert.equal(result.code, "invalidParams");
+    assert.equal(result.message, LONE_METADATA);
+  }
+  assert.equal((await submit({ [EMOJI]: EMOJI })).ok, true);
+  const loop = { stage: 1 };
+  loop.self = loop;
+  assert.equal((await submit(loop)).message, "Metadata must be JSON.");
+
+  const loneId = `op-${LONE_HIGH}`;
+  assert.equal((await submit(null, loneId)).message, LONE_OPERATION_ID);
+  assert.equal((await submit(null, `${"o".repeat(99)}${LONE_LOW}`)).message, LONE_OPERATION_ID);
+  // An operationId longer than 100 UTF-16 units is ignored, as on GameRush.
+  assert.equal((await submit(null, `${"o".repeat(100)}${LONE_LOW}`)).ok, true);
+  assert.equal((await submit(null, `op-${EMOJI}`)).ok, true);
+  // metadata is checked before operationId, and both before the declared range.
+  assert.equal((await submit({ a: LONE_HIGH }, loneId)).message, LONE_METADATA);
+  const outside = await sdk.leaderboards.submit("score", 1000, { operationId: loneId });
+  assert.equal(outside.message, LONE_OPERATION_ID);
+  sdk.mock.defineLeaderboard("open", { minValue: null, maxValue: null });
+  assert.equal(
+    (await sdk.leaderboards.submit("open", 1, { metadata: { a: LONE_HIGH } })).message,
+    LONE_METADATA,
+  );
+});
+
+const LONE_METADATA = "Metadata must not contain lone surrogates.";
+const LONE_OPERATION_ID = "Operation ID must not contain lone surrogates.";
 
 test("cloud save round-trips and guests get signInRequired", async () => {
   sdk.mock.reset();
