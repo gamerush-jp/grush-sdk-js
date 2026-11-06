@@ -151,6 +151,81 @@ test("mock rooms follow the server's room code rules", async () => {
   assert.equal(sdk.net.room.roomCode, "A1B2C3D4E5F6");
 });
 
+test("a room at the target leaves its bots behind and starts a new room", async () => {
+  sdk.mock.reset();
+  const bots = [1, 2, 3, 4].map((n) => sdk.mock.addPeer(`Bot ${n}`));
+  const heard = [];
+  bots[0].on("message", (message) => heard.push(message.text()));
+
+  const joined = await sdk.net.join({ targetRoomSize: 4 });
+
+  assert.equal(joined.ok, true);
+  const room = joined.value;
+  assert.equal(room.roomCode, "MOCKROOM2");
+  assert.deepEqual(
+    room.peers.map((peer) => peer.index),
+    [0],
+  );
+  assert.equal(room.isHost(), true);
+
+  const received = [];
+  room.on("message", (message) => received.push(message.text()));
+  bots[0].send("from the old room");
+  room.send("to the new room");
+  await flush();
+  assert.deepEqual(received, []);
+  assert.deepEqual(heard, []);
+
+  // Removing a bot that was left behind must not touch the new room.
+  sdk.mock.removePeer(bots[1]);
+  await flush();
+  assert.equal(room.isClosed, false);
+  assert.equal((await sdk.net.join({ targetRoomSize: 4 })).value.roomCode, "MOCKROOM2");
+});
+
+test("a room below the target keeps its bots", async () => {
+  sdk.mock.reset();
+  sdk.mock.addPeer("Bot");
+  const room = (await sdk.net.join({ targetRoomSize: 2 })).value;
+  assert.equal(room.roomCode, "MOCKROOM");
+  assert.equal(room.peers.length, 2);
+});
+
+test("a requested room ignores the target", async () => {
+  sdk.mock.reset();
+  sdk.mock.addPeer("Bot");
+  const room = (await sdk.net.join({ roomCode: "ABCD", targetRoomSize: 1 })).value;
+  assert.equal(room.roomCode, "ABCD");
+  assert.equal(room.peers.length, 2);
+});
+
+test("the target follows GameRush's range, not maxPeers", async () => {
+  sdk.mock.reset();
+  sdk.mock.config.maxPeers = 16;
+  for (const targetRoomSize of [0, 9, 4.5, "4", null, Number.NaN]) {
+    assert.equal((await sdk.net.join({ targetRoomSize })).code, "invalidParams");
+  }
+  assert.equal((await sdk.net.join({ targetRoomSize: 8 })).ok, true);
+});
+
+test("reset starts room names over", async () => {
+  sdk.mock.reset();
+  sdk.mock.addPeer("Bot");
+  assert.equal((await sdk.net.join({ targetRoomSize: 1 })).value.roomCode, "MOCKROOM2");
+  sdk.mock.reset();
+  sdk.mock.addPeer("Bot");
+  assert.equal((await sdk.net.join({ targetRoomSize: 1 })).value.roomCode, "MOCKROOM2");
+});
+
+test("a target below the room's limit moves on before the room is full", async () => {
+  sdk.mock.reset();
+  sdk.mock.config.maxPeers = 2;
+  sdk.mock.addPeer("Bot");
+  sdk.mock.addPeer("Bot 2");
+  const room = (await sdk.net.join({ targetRoomSize: 8 })).value;
+  assert.equal(room.roomCode, "MOCKROOM2");
+});
+
 test("a full mock room refuses to join with unavailable", async () => {
   sdk.mock.reset();
   sdk.mock.config.maxPeers = 2;

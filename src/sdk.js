@@ -23,7 +23,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.12.0";
+export const VERSION = "0.13.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -407,6 +407,7 @@ export function createGRush(options = {}) {
       closeCurrentRoom("replaced");
       const params = { mode: typeof opts.mode === "string" && opts.mode ? opts.mode : "default" };
       if (typeof opts.roomCode === "string" && opts.roomCode) params.roomCode = opts.roomCode;
+      if (opts.targetRoomSize !== undefined) params.targetRoomSize = opts.targetRoomSize;
       const result = await active.call("net.join", params);
       if (!result.ok) return result;
       const { source, info } = result.value ?? {};

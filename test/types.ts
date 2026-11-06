@@ -15,7 +15,7 @@ async function useSdk(): Promise<void> {
     void code;
   }
 
-  const joined = await GRush.net.join({ mode: "duel" });
+  const joined = await GRush.net.join({ mode: "duel", targetRoomSize: 4 });
   if (!joined.ok) return;
   const room: GRushRoom = joined.value;
   room.on("message", (message: GRushMessage) => {

@@ -731,7 +731,17 @@ export interface GRushSdk {
     isAvailable(): boolean;
   };
   net: {
-    join(options?: { mode?: string; roomCode?: string }): Promise<GRushResult<GRushRoom>>;
+    /**
+     * 部屋へ入る。`targetRoomSize` は部屋の目安の人数で、1〜8 の整数。渡すと、新しい部屋から最大 8 部屋を確かめ、
+     * 目安に届いていない部屋のうち最も人数の少ない部屋へ入る。確かめた部屋がどれも目安以上なら新しい部屋ができる。
+     * 範囲の外は `invalidParams`。`roomCode` で部屋を指定したときは、指定した部屋へ入る。目安を知らない版の
+     * GameRush では無視され、ゲームからは見分けられない。
+     */
+    join(options?: {
+      mode?: string;
+      roomCode?: string;
+      targetRoomSize?: number;
+    }): Promise<GRushResult<GRushRoom>>;
     readonly room: GRushRoom | null;
   };
   mock: GRushMock;

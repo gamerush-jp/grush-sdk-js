@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.12.0 */
+/*! GameRush SDK for JavaScript v0.13.0 */
 
 // src/analytics-rules.js
 var ANALYTICS_EVENT_KINDS = ["onboarding", "funnel", "custom", "economy"];
@@ -588,6 +588,7 @@ function messageOf(error, fallback) {
 // src/mock-net.js
 var MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
 var ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
+var MAX_TARGET_ROOM_SIZE = 8;
 function later(callback) {
   setTimeout(callback, 0);
 }
@@ -623,6 +624,7 @@ function createMockNet(config, localPeerWire) {
   let roomCode = "";
   let hostIndex = -1;
   let peerSerial = 0;
+  let roomSerial = 1;
   function nextFreeIndex() {
     for (let index = 0; index < config.maxPeers; index += 1) {
       if (!members.has(index) && index !== localIndex) return index;
@@ -714,13 +716,27 @@ function createMockNet(config, localPeerWire) {
     local.clear();
     hostIndex = lowestIndex();
   }
+  function startNextRoom() {
+    for (const peer of members.values()) peer.listeners.clear();
+    members.clear();
+    outgoingSeq.clear();
+    roomSerial += 1;
+    roomCode = `MOCKROOM${roomSerial}`;
+  }
   function join(params) {
     leave();
     const mode = params.mode ?? "default";
     const requested = params.roomCode;
+    const target = params.targetRoomSize;
     if (!MODE_PATTERN.test(mode)) return failure(CODES.invalidParams, "Invalid mode.");
     if (requested !== void 0 && !ROOM_CODE_PATTERN.test(requested)) {
       return failure(CODES.invalidParams, "Invalid room code.");
+    }
+    if (target !== void 0 && !(Number.isInteger(target) && target >= 1 && target <= MAX_TARGET_ROOM_SIZE)) {
+      return failure(CODES.invalidParams, "Invalid target room size.");
+    }
+    if (requested === void 0 && target !== void 0 && members.size >= Math.min(target, config.maxPeers)) {
+      startNextRoom();
     }
     const index = nextFreeIndex();
     if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
@@ -759,6 +775,7 @@ function createMockNet(config, localPeerWire) {
     outgoingSeq.clear();
     leave();
     roomCode = "";
+    roomSerial = 1;
     hostIndex = -1;
   }
   return { join, addPeer, removePeer, raiseError, reset };
@@ -2250,7 +2267,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.12.0";
+var VERSION = "0.13.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
@@ -2567,6 +2584,7 @@ function createGRush(options = {}) {
       closeCurrentRoom("replaced");
       const params = { mode: typeof opts.mode === "string" && opts.mode ? opts.mode : "default" };
       if (typeof opts.roomCode === "string" && opts.roomCode) params.roomCode = opts.roomCode;
+      if (opts.targetRoomSize !== void 0) params.targetRoomSize = opts.targetRoomSize;
       const result = await active.call("net.join", params);
       if (!result.ok) return result;
       const { source, info } = result.value ?? {};

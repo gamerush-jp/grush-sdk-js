@@ -3,6 +3,8 @@ import { CODES, failure, ok } from "./result.js";
 
 const MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
 const ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
+// GameRush's room capacity, not config.maxPeers: the mock refuses what GameRush refuses.
+const MAX_TARGET_ROOM_SIZE = 8;
 
 function later(callback) {
   setTimeout(callback, 0);
@@ -40,6 +42,7 @@ export function createMockNet(config, localPeerWire) {
   let roomCode = "";
   let hostIndex = -1;
   let peerSerial = 0;
+  let roomSerial = 1;
 
   function nextFreeIndex() {
     for (let index = 0; index < config.maxPeers; index += 1) {
@@ -142,15 +145,39 @@ export function createMockNet(config, localPeerWire) {
     hostIndex = lowestIndex();
   }
 
+  // The mock holds one room, so a room at the target stands for every room being at the target.
+  // The game moves to a new room and the bots stay behind.
+  function startNextRoom() {
+    for (const peer of members.values()) peer.listeners.clear();
+    members.clear();
+    outgoingSeq.clear();
+    roomSerial += 1;
+    roomCode = `MOCKROOM${roomSerial}`;
+  }
+
   function join(params) {
     leave();
     const mode = params.mode ?? "default";
     const requested = params.roomCode;
-    // Same codes as GameRush: a malformed mode or room code is the game's to fix, a full room
-    // is worth retrying later.
+    const target = params.targetRoomSize;
+    // Same codes as GameRush: a malformed mode, room code or target is the game's to fix, a full
+    // room is worth retrying later.
     if (!MODE_PATTERN.test(mode)) return failure(CODES.invalidParams, "Invalid mode.");
     if (requested !== undefined && !ROOM_CODE_PATTERN.test(requested)) {
       return failure(CODES.invalidParams, "Invalid room code.");
+    }
+    if (
+      target !== undefined &&
+      !(Number.isInteger(target) && target >= 1 && target <= MAX_TARGET_ROOM_SIZE)
+    ) {
+      return failure(CODES.invalidParams, "Invalid target room size.");
+    }
+    if (
+      requested === undefined &&
+      target !== undefined &&
+      members.size >= Math.min(target, config.maxPeers)
+    ) {
+      startNextRoom();
     }
     const index = nextFreeIndex();
     if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
@@ -191,6 +218,7 @@ export function createMockNet(config, localPeerWire) {
     outgoingSeq.clear();
     leave();
     roomCode = "";
+    roomSerial = 1;
     hostIndex = -1;
   }
 
