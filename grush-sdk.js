@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.13.0 */
+/*! GameRush SDK for JavaScript v0.14.0 */
 "use strict";
 (() => {
   // src/analytics-rules.js
@@ -542,6 +542,7 @@
     consentDeclined: "consentDeclined",
     invalidParams: "invalidParams",
     conflict: "conflict",
+    previewRequired: "previewRequired",
     internal: "internal"
   });
   var PASS_THROUGH_CODES = new Set(Object.values(CODES));
@@ -2268,7 +2269,7 @@
   }
 
   // src/sdk.js
-  var VERSION = "0.13.0";
+  var VERSION = "0.14.0";
   var REQUIRED_PROTOCOL_VERSION = 1;
   var PLAYER_STATE_PROTOCOL_VERSION = 2;
   var SHARE_PROTOCOL_VERSION = 3;

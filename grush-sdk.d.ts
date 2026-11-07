@@ -7,6 +7,8 @@ export type GRushCode =
   | "consentDeclined"
   | "invalidParams"
   | "conflict"
+  // 確認用の表示（GRush.playerState.onPreview）を購読していないので、他のプレイヤーの公開プレイヤー状態を読めない。
+  | "previewRequired"
   | "internal";
 
 export type GRushResult<T> =
@@ -547,11 +549,16 @@ export interface GRushSdk {
       baseRevision?: number,
       options?: GRushPlayerStateWriteOptions,
     ): Promise<GRushResult<GRushPlayerState>>;
+    /**
+     * 他プレイヤーの状態を疑似 ID で引く。`onPreview` を購読していないと、GameRush は他プレイヤーの状態を
+     * `previewRequired` で断ることがある。
+     */
     get(pseudoIds: string[]): Promise<GRushResult<GRushPlayerState[]>>;
     report(pseudoId: string): Promise<GRushResult<boolean>>;
     /**
      * 相手探し。同じゲームの他プレイヤーの公開状態をランダムに返す。自分と運営が伏せた状態は返らず、
-     * 名前も返らない。`protocolVersion` 7 未満の GameRush では `unsupported`。
+     * 名前も返らない。`protocolVersion` 7 未満の GameRush では `unsupported`。`onPreview` を購読していないと
+     * `previewRequired` で断られることがある。
      */
     sample(options?: GRushSampleOptions): Promise<GRushResult<GRushPlayerState[]>>;
     /**

@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.13.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.14.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -81,7 +81,7 @@ TypeScript の型は `grush-sdk.d.ts`。
 | `GRush.analytics.isAvailable()` | `true` / `false`（同期） |
 | `GRush.net.join({ mode, roomCode, targetRoomSize })` | 部屋（下記） |
 
-失敗時の `code` は `unsupported` / `unavailable` / `timeout` / `rateLimited`（`retryAfterMs` 付き）/ `signInRequired` / `consentDeclined` / `invalidParams` / `conflict`（クラウドセーブの版ずれ）/ `internal`。
+失敗時の `code` は `unsupported` / `unavailable` / `timeout` / `rateLimited`（`retryAfterMs` 付き）/ `signInRequired` / `consentDeclined` / `invalidParams` / `conflict`（クラウドセーブの版ずれ）/ `previewRequired`（`onPreview` を購読せずに他プレイヤーの公開状態を読んだ）/ `internal`。
 
 集約が `sum` のランキングへ投稿を再送するときは、必ず同じ `operationId` を渡すこと。渡さないと二重に加算される。
 

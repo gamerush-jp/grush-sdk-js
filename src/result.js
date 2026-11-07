@@ -7,6 +7,7 @@ export const CODES = Object.freeze({
   consentDeclined: "consentDeclined",
   invalidParams: "invalidParams",
   conflict: "conflict",
+  previewRequired: "previewRequired",
   internal: "internal",
 });
 

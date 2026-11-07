@@ -220,3 +220,14 @@ test("a runtime without the social APIs is unsupported, and unreadable answers a
   assert.equal(limited.code, "rateLimited");
   assert.equal(limited.retryAfterMs, 9);
 });
+
+test("sample passes previewRequired through with its message", async () => {
+  const error = new Error("Register a player state preview first.");
+  error.code = "previewRequired";
+  runtime.PlayerState.sample = () => Promise.reject(error);
+
+  const result = await sdk.playerState.sample();
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "previewRequired");
+  assert.equal(result.message, "Register a player state preview first.");
+});
