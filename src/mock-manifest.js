@@ -6,6 +6,11 @@ const MAX_BYTES = 64 * 1024;
 const MAX_LEADERBOARDS = 20;
 const MAX_TITLE_LENGTH = 60;
 const KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
+
+// GameRush also refuses "." and "..": in an API path they would point to another route.
+export function isLeaderboardKey(key) {
+  return typeof key === "string" && key !== "." && key !== ".." && KEY_PATTERN.test(key);
+}
 const LINE_BREAKING_OR_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]+/gu;
 // A lone surrogate (half of a UTF-16 pair). With the u flag a whole pair is one code point, so only
 // the unpaired halves match.
@@ -64,7 +69,7 @@ function readEntry(item, at, seen) {
       return { ok: false, error: `${MANIFEST_PATH} has an unknown field: ${at}.${field}` };
     }
   }
-  if (typeof item.key !== "string" || !KEY_PATTERN.test(item.key)) return invalidField(`${at}.key`);
+  if (!isLeaderboardKey(item.key)) return invalidField(`${at}.key`);
   if (seen.has(item.key)) {
     return {
       ok: false,

@@ -174,6 +174,29 @@ test("loadLeaderboards declares the boards and reports mistakes as invalidParams
   assert.equal(failed.message, "grush.json has an invalid value: leaderboards[0].title");
 });
 
+test("the keys . and .. are refused like on GameRush", async () => {
+  for (const key of [".", ".."]) {
+    assert.equal(
+      parseLeaderboardManifest({ leaderboards: [{ ...HIGH_SCORE, key }] }).error,
+      "grush.json has an invalid value: leaderboards[0].key",
+    );
+    // defineLeaderboard does not check the key, so the calls must refuse it themselves.
+    sdk.mock.defineLeaderboard(key);
+    for (const result of [
+      await sdk.leaderboards.submit(key, 1),
+      await sdk.leaderboards.top(key),
+      await sdk.leaderboards.aroundMe(key),
+    ]) {
+      assert.equal(result.code, "invalidParams");
+      assert.equal(result.message, "Invalid leaderboard key.");
+    }
+  }
+  assert.equal(
+    parseLeaderboardManifest({ leaderboards: [{ ...HIGH_SCORE, key: "..." }] }).ok,
+    true,
+  );
+});
+
 test("disabled boards and boards without a range behave like GameRush", async () => {
   sdk.mock.loadLeaderboards({
     leaderboards: [

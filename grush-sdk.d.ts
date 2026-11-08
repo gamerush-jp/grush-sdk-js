@@ -1,3 +1,7 @@
+// Types for the GameRush SDK for JavaScript.
+// Docs: https://gamerush.jp/sdk
+// Source and issues: https://github.com/gamerush-jp/grush-sdk-js
+
 export type GRushCode =
   | "unsupported"
   | "unavailable"

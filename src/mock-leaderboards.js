@@ -1,4 +1,5 @@
 import { gameJsonError, operationIdError } from "./game-json.js";
+import { isLeaderboardKey } from "./mock-manifest.js";
 
 const PERIODS = new Set(["all_time", "daily", "weekly", "monthly"]);
 
@@ -117,6 +118,7 @@ export function createMockLeaderboards(selfIdentity, now = () => new Date()) {
 
   // GameRush answers an undeclared key and a disabled board the same way.
   function playable(key) {
+    if (!isLeaderboardKey(key)) return { error: "Invalid leaderboard key." };
     const board = boards.get(key);
     if (!board) {
       return {

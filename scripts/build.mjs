@@ -6,7 +6,15 @@ import { build } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-const banner = `/*! GameRush SDK for JavaScript v${pkg.version} */`;
+// The SDK is often copied into a game's repository, so the file itself says where the docs and the
+// issue tracker are.
+const banner = [
+  `/*! GameRush SDK for JavaScript v${pkg.version}`,
+  " * Docs: https://gamerush.jp/sdk",
+  " * Source: https://github.com/gamerush-jp/grush-sdk-js",
+  " * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues",
+  " */",
+].join("\n");
 
 const targets = [
   { entry: "src/global.js", outfile: "grush-sdk.js", format: "iife" },

@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.14.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.14.1/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -99,6 +99,9 @@ if (loaded.ok) {
 }
 ```
 
+- payload は JSON にして 256KB まで。スロット名は英数字と `.` `_` `:` `-` の 1〜64 文字で、省略すると `default`。外れると `invalidParams`
+- 15 秒待っても GameRush から答えが無ければ `timeout` で返る。`load` / `save` / `remove` の Promise が答えを待ったまま止まることは無い。`timeout` の `save` は届いたかどうか分からないので、`load` で確かめてから書き直すか、`baseRevision` を付けて送り直す
+- 保存の回数に GameRush が決めた上限は無い。それでも毎フレームは呼ばず、区切りのよいところでまとめて保存する
 - `fallback: "local"` を渡すと、GameRush がプレイヤーのサインインを確かめられないとき（渡さなければ `signInRequired` になるとき）だけ、セーブを端末に読み書きする。そのとき返る項目は `storage: "local"`、`revision: 0`。クラウドに置けたときは `storage: "cloud"`
 - 端末のセーブはその端末のそのアプリ（ブラウザ）にだけあり、ブラウザが消すことがある。サインインしても自動ではクラウドへ上がらない。サインイン後の `load` でクラウドに無ければ端末のセーブが返るので、それを `save` するとクラウドへ上がる。`fallback: "local"` 付きの `save` / `remove` がクラウドで成功すると、同じスロットの、そのプレイヤーの端末のセーブと、どのアカウントのものか分からない端末のセーブが消える。別のアカウントのものは残る
 - サインイン済みの `load` は、別のアカウントのものと分かっている端末のセーブを返さない。サインインを確かめられないときの `load` と `remove` は、どのアカウントで保存したかに関係なく、その端末のセーブを返し、消す。共用の端末では、前に使った人の端末のセーブが返ることがある

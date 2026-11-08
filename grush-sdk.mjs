@@ -1,4 +1,8 @@
-/*! GameRush SDK for JavaScript v0.14.0 */
+/*! GameRush SDK for JavaScript v0.14.1
+ * Docs: https://gamerush.jp/sdk
+ * Source: https://github.com/gamerush-jp/grush-sdk-js
+ * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
+ */
 
 // src/analytics-rules.js
 var ANALYTICS_EVENT_KINDS = ["onboarding", "funnel", "custom", "economy"];
@@ -184,6 +188,135 @@ function operationIdError(value) {
   return HAS_LONE_SURROGATE.test(value) ? "Operation ID must not contain lone surrogates." : null;
 }
 
+// src/mock-manifest.js
+var MANIFEST_PATH = "grush.json";
+var MAX_BYTES = 64 * 1024;
+var MAX_LEADERBOARDS = 20;
+var MAX_TITLE_LENGTH = 60;
+var KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
+function isLeaderboardKey(key) {
+  return typeof key === "string" && key !== "." && key !== ".." && KEY_PATTERN.test(key);
+}
+var LINE_BREAKING_OR_CONTROL2 = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]+/gu;
+var LONE_SURROGATE2 = /\p{Cs}/gu;
+var TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set(["$schema", "leaderboards"]);
+var ENTRY_FIELDS = /* @__PURE__ */ new Set([
+  "key",
+  "title",
+  "sort",
+  "valueType",
+  "aggregation",
+  "period",
+  "minValue",
+  "maxValue",
+  "enabled"
+]);
+var CHOICES = {
+  sort: ["desc", "asc"],
+  valueType: ["int", "float", "duration_ms"],
+  aggregation: ["best", "last", "sum"],
+  period: ["all_time", "daily", "weekly", "monthly"]
+};
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function invalidField(field) {
+  return { ok: false, error: `${MANIFEST_PATH} has an invalid value: ${field}` };
+}
+function readSource(source) {
+  if (typeof source !== "string" && !(source instanceof Uint8Array)) {
+    return { ok: true, value: source };
+  }
+  const bytes = typeof source === "string" ? new TextEncoder().encode(source) : source;
+  if (bytes.byteLength > MAX_BYTES) {
+    return { ok: false, error: `${MANIFEST_PATH} is too large (${MAX_BYTES / 1024}KB at most).` };
+  }
+  try {
+    const text2 = new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
+    return { ok: true, value: JSON.parse(text2) };
+  } catch {
+    return { ok: false, error: `${MANIFEST_PATH} can't be read as a JSON object.` };
+  }
+}
+function readEntry(item, at, seen) {
+  if (!isPlainObject(item)) return invalidField(at);
+  for (const field of Object.keys(item)) {
+    if (!ENTRY_FIELDS.has(field)) {
+      return { ok: false, error: `${MANIFEST_PATH} has an unknown field: ${at}.${field}` };
+    }
+  }
+  if (!isLeaderboardKey(item.key)) return invalidField(`${at}.key`);
+  if (seen.has(item.key)) {
+    return {
+      ok: false,
+      error: `${MANIFEST_PATH} declares the leaderboard key more than once: ${item.key}`
+    };
+  }
+  seen.add(item.key);
+  for (const field of ["minValue", "maxValue"]) {
+    const value = item[field];
+    if (value !== void 0 && value !== null && !Number.isFinite(value)) {
+      return invalidField(`${at}.${field}`);
+    }
+  }
+  const title = typeof item.title === "string" ? item.title.replace(LONE_SURROGATE2, "").replace(LINE_BREAKING_OR_CONTROL2, " ").trim() : "";
+  if (title.length < 1 || title.length > MAX_TITLE_LENGTH) return invalidField(`${at}.title`);
+  for (const [field, choices] of Object.entries(CHOICES)) {
+    if (!choices.includes(item[field])) return invalidField(`${at}.${field}`);
+  }
+  if (item.enabled !== void 0 && typeof item.enabled !== "boolean") {
+    return invalidField(`${at}.enabled`);
+  }
+  const minValue = item.minValue ?? null;
+  const maxValue = item.maxValue ?? null;
+  if (minValue === null !== (maxValue === null) || minValue !== null && minValue >= maxValue) {
+    return invalidField(`${at}.minValue / maxValue`);
+  }
+  return {
+    ok: true,
+    entry: {
+      key: item.key,
+      title,
+      sort: item.sort,
+      valueType: item.valueType,
+      aggregation: item.aggregation,
+      period: item.period,
+      minValue,
+      maxValue,
+      enabled: item.enabled !== false
+    }
+  };
+}
+function parseLeaderboardManifest(source) {
+  const read = readSource(source);
+  if (!read.ok) return read;
+  const parsed = read.value;
+  if (!isPlainObject(parsed)) {
+    return { ok: false, error: `${MANIFEST_PATH} can't be read as a JSON object.` };
+  }
+  for (const field of Object.keys(parsed)) {
+    if (!TOP_LEVEL_FIELDS.has(field)) {
+      return { ok: false, error: `${MANIFEST_PATH} has an unknown field: ${field}` };
+    }
+  }
+  const list = parsed.leaderboards ?? [];
+  if (!Array.isArray(list)) return invalidField("leaderboards");
+  if (list.length > MAX_LEADERBOARDS) {
+    return {
+      ok: false,
+      error: `${MANIFEST_PATH} can declare up to ${MAX_LEADERBOARDS} leaderboards.`
+    };
+  }
+  const leaderboards = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const [index, item] of list.entries()) {
+    const read2 = readEntry(item, `leaderboards[${index}]`, seen);
+    if (!read2.ok) return read2;
+    leaderboards.push(read2.entry);
+  }
+  return { ok: true, leaderboards };
+}
+
 // src/mock-leaderboards.js
 var PERIODS = /* @__PURE__ */ new Set(["all_time", "daily", "weekly", "monthly"]);
 function clamp(value, fallback, max) {
@@ -279,6 +412,7 @@ function createMockLeaderboards(selfIdentity, now = () => /* @__PURE__ */ new Da
     }));
   }
   function playable(key) {
+    if (!isLeaderboardKey(key)) return { error: "Invalid leaderboard key." };
     const board = boards.get(key);
     if (!board) {
       return {
@@ -381,132 +515,6 @@ function createMockLeaderboards(selfIdentity, now = () => /* @__PURE__ */ new Da
     };
   }
   return { define, load, addRival, list, submit, page, reset: () => boards.clear() };
-}
-
-// src/mock-manifest.js
-var MANIFEST_PATH = "grush.json";
-var MAX_BYTES = 64 * 1024;
-var MAX_LEADERBOARDS = 20;
-var MAX_TITLE_LENGTH = 60;
-var KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
-var LINE_BREAKING_OR_CONTROL2 = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]+/gu;
-var LONE_SURROGATE2 = /\p{Cs}/gu;
-var TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set(["$schema", "leaderboards"]);
-var ENTRY_FIELDS = /* @__PURE__ */ new Set([
-  "key",
-  "title",
-  "sort",
-  "valueType",
-  "aggregation",
-  "period",
-  "minValue",
-  "maxValue",
-  "enabled"
-]);
-var CHOICES = {
-  sort: ["desc", "asc"],
-  valueType: ["int", "float", "duration_ms"],
-  aggregation: ["best", "last", "sum"],
-  period: ["all_time", "daily", "weekly", "monthly"]
-};
-function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function invalidField(field) {
-  return { ok: false, error: `${MANIFEST_PATH} has an invalid value: ${field}` };
-}
-function readSource(source) {
-  if (typeof source !== "string" && !(source instanceof Uint8Array)) {
-    return { ok: true, value: source };
-  }
-  const bytes = typeof source === "string" ? new TextEncoder().encode(source) : source;
-  if (bytes.byteLength > MAX_BYTES) {
-    return { ok: false, error: `${MANIFEST_PATH} is too large (${MAX_BYTES / 1024}KB at most).` };
-  }
-  try {
-    const text2 = new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
-    return { ok: true, value: JSON.parse(text2) };
-  } catch {
-    return { ok: false, error: `${MANIFEST_PATH} can't be read as a JSON object.` };
-  }
-}
-function readEntry(item, at, seen) {
-  if (!isPlainObject(item)) return invalidField(at);
-  for (const field of Object.keys(item)) {
-    if (!ENTRY_FIELDS.has(field)) {
-      return { ok: false, error: `${MANIFEST_PATH} has an unknown field: ${at}.${field}` };
-    }
-  }
-  if (typeof item.key !== "string" || !KEY_PATTERN.test(item.key)) return invalidField(`${at}.key`);
-  if (seen.has(item.key)) {
-    return {
-      ok: false,
-      error: `${MANIFEST_PATH} declares the leaderboard key more than once: ${item.key}`
-    };
-  }
-  seen.add(item.key);
-  for (const field of ["minValue", "maxValue"]) {
-    const value = item[field];
-    if (value !== void 0 && value !== null && !Number.isFinite(value)) {
-      return invalidField(`${at}.${field}`);
-    }
-  }
-  const title = typeof item.title === "string" ? item.title.replace(LONE_SURROGATE2, "").replace(LINE_BREAKING_OR_CONTROL2, " ").trim() : "";
-  if (title.length < 1 || title.length > MAX_TITLE_LENGTH) return invalidField(`${at}.title`);
-  for (const [field, choices] of Object.entries(CHOICES)) {
-    if (!choices.includes(item[field])) return invalidField(`${at}.${field}`);
-  }
-  if (item.enabled !== void 0 && typeof item.enabled !== "boolean") {
-    return invalidField(`${at}.enabled`);
-  }
-  const minValue = item.minValue ?? null;
-  const maxValue = item.maxValue ?? null;
-  if (minValue === null !== (maxValue === null) || minValue !== null && minValue >= maxValue) {
-    return invalidField(`${at}.minValue / maxValue`);
-  }
-  return {
-    ok: true,
-    entry: {
-      key: item.key,
-      title,
-      sort: item.sort,
-      valueType: item.valueType,
-      aggregation: item.aggregation,
-      period: item.period,
-      minValue,
-      maxValue,
-      enabled: item.enabled !== false
-    }
-  };
-}
-function parseLeaderboardManifest(source) {
-  const read = readSource(source);
-  if (!read.ok) return read;
-  const parsed = read.value;
-  if (!isPlainObject(parsed)) {
-    return { ok: false, error: `${MANIFEST_PATH} can't be read as a JSON object.` };
-  }
-  for (const field of Object.keys(parsed)) {
-    if (!TOP_LEVEL_FIELDS.has(field)) {
-      return { ok: false, error: `${MANIFEST_PATH} has an unknown field: ${field}` };
-    }
-  }
-  const list = parsed.leaderboards ?? [];
-  if (!Array.isArray(list)) return invalidField("leaderboards");
-  if (list.length > MAX_LEADERBOARDS) {
-    return {
-      ok: false,
-      error: `${MANIFEST_PATH} can declare up to ${MAX_LEADERBOARDS} leaderboards.`
-    };
-  }
-  const leaderboards = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const [index, item] of list.entries()) {
-    const read2 = readEntry(item, `leaderboards[${index}]`, seen);
-    if (!read2.ok) return read2;
-    leaderboards.push(read2.entry);
-  }
-  return { ok: true, leaderboards };
 }
 
 // src/bytes.js
@@ -2268,7 +2276,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.14.0";
+var VERSION = "0.14.1";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
