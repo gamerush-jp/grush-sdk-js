@@ -846,6 +846,7 @@ function withDecoders(message) {
 var SKU = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var ACK_MAX_IDS = 100;
+var PENDING_MAX = 100;
 function uuid() {
   const crypto = globalThis.crypto;
   if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
@@ -892,7 +893,7 @@ function createMockShop({ config, now = () => Date.now() }) {
   }
   function purchase({ sku }) {
     if (typeof sku !== "string" || !SKU.test(sku)) return invalid("Invalid sku.");
-    if (!enabled()) return failure(CODES.unavailable, "The shop of this game is not open.");
+    if (!enabled()) return failure(CODES.unsupported, "Nothing can be bought here.");
     if (!config.signedIn) return failure(CODES.signInRequired, "Purchases require sign-in.");
     if (!productsOf(config).some((product) => product.sku === sku)) {
       return invalid("No product for that sku.");
@@ -904,7 +905,9 @@ function createMockShop({ config, now = () => Date.now() }) {
     schedule();
     return ok({ status: "redirecting" });
   }
-  const pending = () => ok(grants.filter((grant) => !grant.acked).map(grantWire));
+  const pending = () => ok(
+    grants.filter((grant) => !grant.acked).slice(0, PENDING_MAX).map(grantWire)
+  );
   function ack({ ids }) {
     if (!Array.isArray(ids) || ids.length === 0 || ids.length > ACK_MAX_IDS) {
       return invalid(`ids must be 1 to ${ACK_MAX_IDS} grant ids.`);
@@ -2495,6 +2498,8 @@ var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 var ROOM_CONFIG_PROTOCOL_VERSION = 11;
 var SHOP_PROTOCOL_VERSION = 12;
 var SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
+var SHOP_ACK_MAX_IDS = 100;
+var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var ROOM_CONFIG_OPTIONS = ["maxPeers", "topology", "hostSelection"];
 var BACKENDS = /* @__PURE__ */ new Set(["auto", "web", "mock", "none"]);
 var LOCAL_HOSTNAMES = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -2688,13 +2693,14 @@ function createGRush(options = {}) {
     ack: (ids) => mapped("trade.ack", { ids }, (raw) => countOf(raw, "acked"), TRADE_PROTOCOL_VERSION),
     report: (tradeId) => mapped("trade.report", { tradeId }, (raw) => flagOf(raw, "reported"), TRADE_PROTOCOL_VERSION)
   };
+  function shopSupported() {
+    const active = backend();
+    return active.isAvailable() && active.protocolVersion() >= SHOP_PROTOCOL_VERSION;
+  }
   const shop = {
     products: () => mapped("shop.products", void 0, required(shopProductsOf), SHOP_PROTOCOL_VERSION),
     purchase(sku) {
-      const active = backend();
-      if (!active.isAvailable() || active.protocolVersion() < SHOP_PROTOCOL_VERSION) {
-        return Promise.resolve(unsupported());
-      }
+      if (!shopSupported()) return Promise.resolve(unsupported());
       if (typeof sku !== "string" || !SHOP_SKU_PATTERN.test(sku)) {
         return Promise.resolve(
           failure(CODES.invalidParams, "sku must be 1-64 lowercase letters, digits, or _ . - .")
@@ -2703,7 +2709,15 @@ function createGRush(options = {}) {
       return mapped("shop.purchase", { sku }, required(shopPurchaseOf), SHOP_PROTOCOL_VERSION);
     },
     pending: () => mapped("shop.pending", void 0, listIn("grants", shopGrantOf), SHOP_PROTOCOL_VERSION),
-    ack: (ids) => mapped("shop.ack", { ids }, (raw) => countOf(raw, "acked"), SHOP_PROTOCOL_VERSION),
+    ack(ids) {
+      if (!shopSupported()) return Promise.resolve(unsupported());
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > SHOP_ACK_MAX_IDS || !ids.every((id) => typeof id === "string" && UUID_PATTERN.test(id))) {
+        return Promise.resolve(
+          failure(CODES.invalidParams, `ids must be 1-${SHOP_ACK_MAX_IDS} grant ids.`)
+        );
+      }
+      return mapped("shop.ack", { ids }, (raw) => countOf(raw, "acked"), SHOP_PROTOCOL_VERSION);
+    },
     owned: () => mapped("shop.owned", void 0, listIn("grants", ownedShopGrantOf), SHOP_PROTOCOL_VERSION),
     onPending: (handler) => shopRelay.subscribe(handler)
   };

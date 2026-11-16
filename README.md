@@ -214,16 +214,21 @@ if (mine.ok) {
 
 ```js
 // 起動したときと、決済から戻って付与が届いたときに、届いたアイテムをセーブへ反映してから ack する。
+// pending は 1 回に最大 100 件なので、ack したら残りが無くなるまで読み直す。
 async function receiveItems() {
-  const pending = await GRush.shop.pending();
-  if (!pending.ok || pending.value.length === 0) return;
-  const fresh = pending.value.filter((grant) => !save.appliedGrants.includes(grant.id));
-  for (const grant of fresh) {
-    giveItem(save, grant.sku);
-    save.appliedGrants.push(grant.id);
+  for (;;) {
+    const pending = await GRush.shop.pending();
+    if (!pending.ok || pending.value.length === 0) return;
+    const fresh = pending.value.filter((grant) => !save.appliedGrants.includes(grant.id));
+    for (const grant of fresh) {
+      giveItem(save, grant.sku);
+      save.appliedGrants.push(grant.id);
+    }
+    const saved = await GRush.cloudSave.save(save);
+    if (!saved.ok) return;
+    const acked = await GRush.shop.ack(pending.value.map((grant) => grant.id)); // 1 回 100 件まで
+    if (!acked.ok || pending.value.length < 100) return;
   }
-  const saved = await GRush.cloudSave.save(save);
-  if (saved.ok) await GRush.shop.ack(pending.value.map((grant) => grant.id)); // 1 回 100 件まで
 }
 GRush.shop.onPending(() => receiveItems());
 receiveItems();
@@ -239,7 +244,7 @@ const bought = await GRush.shop.purchase("gem_pack");
 - 作者が Studio か API キーで登録した商品（sku・商品名・税込みの価格）を、プレイヤーが買う。ゲームは `products()` で一覧を読む
 - **買えるのは Web の GameRush だけ。** アプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空。作者の販売が開いていないときも `enabled: false` の空。`pending`・`ack`・`owned` はどの面でも動く
 - `purchase(sku)` の `status` は `redirecting`（ページがすぐ決済画面へ移る）・`cancelled`（プレイヤーがやめた）・`alreadyOwned`（もう持っている）。**ゲームは `purchase` を呼ぶ前にセーブしておく。** sku が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ GameRush へ送らずに `invalidParams`。ゲストは `signInRequired`
-- **付与は `ack` するまで `pending` に残る。** アイテムをセーブに反映して保存してから `ack(ids)` する（1 回 1〜100 件）。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む。反映済みの付与 ID をセーブに持てば、同じ付与を二度反映しない
+- **付与は `ack` するまで `pending` に残る。** アイテムをセーブに反映して保存してから `ack(ids)` する。`ids` は 1〜100 件の付与 ID で、合わなければ GameRush へ送らずに `invalidParams`。`pending` は 1 回に最大 100 件（古い順）なので、`ack` したら、残りがあればもう一度読む。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む。反映済みの付与 ID をセーブに持てば、同じ付与を二度反映しない
 - `onPending(handler)` は、決済から戻って付与が届いたときに `{ sku }` で1回呼ばれる。登録より先に届いていた合図は、登録したときに1回だけ渡るので、起動したらすぐ登録する。返り値は解除関数。`handler` はそれぞれ別の複製を受け取り、`GRush.configure({ backend })` でバックエンドを切り替えても購読は続く
 - `owned()` は、このプレイヤーがこのゲームで受けた付与のすべて（`ack` 済みかを `acked` で返す）
 - サーバが保証するのは、払ったプレイヤーにアイテムが届くことまで。ゲームの中での使用は改ざんを防げない
@@ -414,7 +419,7 @@ GRush.mock.definePlayerState("custom-rival", { level: 3 }, { rating: 1300 });
 GRush.mock.previewPlayerState("custom-rival", { level: 3 }, { rating: 1300 });
 ```
 
-アイテムの販売のモックは、決済を飛ばす。`GRush.mock.config.shopProducts`（既定は空）に置いた商品を `products()` が返し、`purchase(sku)` はすぐ付与を `pending` に積んで `redirecting` を返し、`onPending` の `handler` を呼ぶ（非同期）。ページは移らない。持っている sku は `alreadyOwned`、一覧に無い sku は `invalidParams`、`signedIn: false` では `signInRequired`。`config.shopPurchaseStatus = "cancelled"` で付与せずに `cancelled` を、`config.shopEnabled = false` で Web 以外の面と同じく `enabled: false` の空を返す（`purchase` は `unavailable`）。`ack` は GameRush と同じく 1〜100 件の付与 ID を受ける。呼び出しの間隔の上限は再現しない。付与は `reset()` で消える。
+アイテムの販売のモックは、決済を飛ばす。`GRush.mock.config.shopProducts`（既定は空）に置いた商品を `products()` が返し、`purchase(sku)` はすぐ付与を `pending` に積んで `redirecting` を返し、`onPending` の `handler` を呼ぶ（非同期）。ページは移らない。持っている sku は `alreadyOwned`、一覧に無い sku は `invalidParams`、`signedIn: false` では `signInRequired`。`config.shopPurchaseStatus = "cancelled"` で付与せずに `cancelled` を、`config.shopEnabled = false` で Web 以外の面と同じく `enabled: false` の空を返す（`purchase` はアプリ・LINE と同じく `unsupported`）。`pending` は GameRush と同じく 1 回に最大 100 件を返す。呼び出しの間隔の上限は再現しない。付与は `reset()` で消える。
 
 ```js
 GRush.mock.config.shopProducts = [{ sku: "gem_pack", name: "宝石 100 個", priceJpy: 120 }];

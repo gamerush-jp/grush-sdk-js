@@ -4,6 +4,8 @@ import { CODES, failure, ok } from "./result.js";
 const SKU = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACK_MAX_IDS = 100;
+// GameRush hands over at most this many pending grants per call, oldest first.
+const PENDING_MAX = 100;
 
 function uuid() {
   const crypto = globalThis.crypto;
@@ -74,7 +76,8 @@ export function createMockShop({ config, now = () => Date.now() }) {
 
   function purchase({ sku }) {
     if (typeof sku !== "string" || !SKU.test(sku)) return invalid("Invalid sku.");
-    if (!enabled()) return failure(CODES.unavailable, "The shop of this game is not open.");
+    // Like the app and LINE, where nothing can be bought.
+    if (!enabled()) return failure(CODES.unsupported, "Nothing can be bought here.");
     if (!config.signedIn) return failure(CODES.signInRequired, "Purchases require sign-in.");
     if (!productsOf(config).some((product) => product.sku === sku)) {
       return invalid("No product for that sku.");
@@ -87,7 +90,13 @@ export function createMockShop({ config, now = () => Date.now() }) {
     return ok({ status: "redirecting" });
   }
 
-  const pending = () => ok(grants.filter((grant) => !grant.acked).map(grantWire));
+  const pending = () =>
+    ok(
+      grants
+        .filter((grant) => !grant.acked)
+        .slice(0, PENDING_MAX)
+        .map(grantWire),
+    );
 
   function ack({ ids }) {
     if (!Array.isArray(ids) || ids.length === 0 || ids.length > ACK_MAX_IDS) {

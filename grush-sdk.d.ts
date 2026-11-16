@@ -521,7 +521,7 @@ export type GRushMockConfig = {
   locale: string | null;
   /** `launch` が返す起動パラメータ。モックは GameRush の制限で確かめずにそのまま返す。 */
   launchParams: Record<string, string>;
-  /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unavailable` で失敗する。既定 `true`。 */
+  /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unsupported` で失敗する（アプリと LINE と同じ）。既定 `true`。 */
   shopEnabled: boolean;
   /** `shop.products` が返す商品。sku・名前・整数の価格がそろわないものは外す。既定は空。 */
   shopProducts: GRushShopProduct[];
@@ -741,9 +741,12 @@ export interface GRushSdk {
      * 送らずに `invalidParams`。ゲストは `signInRequired`。
      */
     purchase(sku: string): Promise<GRushResult<GRushShopPurchaseResult>>;
-    /** 届いたが、まだ `ack` していない付与。 */
+    /** 届いたが、まだ `ack` していない付与（古い順に、1 回に最大 100 件）。`ack` したら、残りがあればもう一度読む。 */
     pending(): Promise<GRushResult<GRushShopGrant[]>>;
-    /** 付与の受け取りを確かめ、記録した件数を返す（1〜100 件）。 */
+    /**
+     * 付与の受け取りを確かめ、記録した件数を返す。`ids` が 1〜100 件の付与 ID（uuid）でなければ、GameRush へ送らずに
+     * `invalidParams`。
+     */
     ack(ids: string[]): Promise<GRushResult<number>>;
     /** このプレイヤーがこのゲームで受けた付与のすべて。 */
     owned(): Promise<GRushResult<GRushShopOwnedGrant[]>>;

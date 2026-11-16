@@ -116,6 +116,16 @@ test("a malformed sku is invalidParams and never reaches GameRush", async () => 
   assert.equal(calls.length, 1);
 });
 
+test("a malformed ack list is invalidParams and never reaches GameRush", async () => {
+  const { calls } = installRuntime(12, RESULTS);
+  const sdk = createGRush();
+  for (const ids of [undefined, "g1", [], ["not-a-uuid"], [GRANT_ID, 3], Array(101).fill(GRANT_ID)]) {
+    assert.equal((await sdk.shop.ack(ids)).code, "invalidParams", JSON.stringify(ids));
+  }
+  assert.equal((await sdk.shop.ack(Array(100).fill(GRANT_ID.toUpperCase()))).ok, true);
+  assert.equal(calls.length, 1);
+});
+
 test("every shop call is unsupported below protocol 12", async () => {
   const { calls, shop } = installRuntime(11, RESULTS);
   const sdk = createGRush();
@@ -125,6 +135,7 @@ test("every shop call is unsupported below protocol 12", async () => {
     await sdk.shop.purchase("Bad sku"),
     await sdk.shop.pending(),
     await sdk.shop.ack([GRANT_ID]),
+    await sdk.shop.ack([]),
     await sdk.shop.owned(),
   ]) {
     assert.equal(result.code, "unsupported");
@@ -246,5 +257,23 @@ test("the mock refuses what GameRush refuses", async () => {
 
   sdk.mock.config.shopEnabled = false;
   assert.deepEqual((await sdk.shop.products()).value, { enabled: false, products: [] });
-  assert.equal((await sdk.shop.purchase("gem_pack")).code, "unavailable");
+  assert.equal((await sdk.shop.purchase("gem_pack")).code, "unsupported");
+});
+
+test("the mock hands over at most 100 pending grants, oldest first", async () => {
+  const sdk = mockSdk();
+  sdk.mock.config.shopProducts = Array.from({ length: 101 }, (_, index) => ({
+    sku: `item${index}`,
+    name: "Item",
+    priceJpy: 100,
+  }));
+  for (let index = 0; index < 101; index += 1) await sdk.shop.purchase(`item${index}`);
+  const first = (await sdk.shop.pending()).value;
+  assert.equal(first.length, 100);
+  assert.equal(first[0].sku, "item0");
+  assert.equal((await sdk.shop.ack(first.map((grant) => grant.id))).value, 100);
+  assert.deepEqual(
+    (await sdk.shop.pending()).value.map((grant) => grant.sku),
+    ["item100"],
+  );
 });
