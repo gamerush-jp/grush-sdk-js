@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.14.1/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.15.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -79,7 +79,7 @@ TypeScript の型は `grush-sdk.d.ts`。
 | `GRush.analytics.logCustomEvent(name, value = 1, { fields })` | `true` / `false`（同期） |
 | `GRush.analytics.logEconomyEvent(flowType, currency, amount, endingBalance, transactionType, { itemSku, fields })` | `true` / `false`（同期） |
 | `GRush.analytics.isAvailable()` | `true` / `false`（同期） |
-| `GRush.net.join({ mode, roomCode, targetRoomSize })` | 部屋（下記） |
+| `GRush.net.join({ mode, roomCode, targetRoomSize, maxPeers, topology, hostSelection })` | 部屋（下記） |
 
 失敗時の `code` は `unsupported` / `unavailable` / `timeout` / `rateLimited`（`retryAfterMs` 付き）/ `signInRequired` / `consentDeclined` / `invalidParams` / `conflict`（クラウドセーブの版ずれ）/ `previewRequired`（`onPreview` を購読せずに他プレイヤーの公開状態を読んだ）/ `internal`。
 
@@ -313,8 +313,27 @@ if (joined.ok) {
 - `channel: "unreliable"` は落ちる・順序が入れ替わる前提で書く。いまの中継では落ちないが、WebRTC へ切り替わった時点で落ち始める
 - `to` に peer の `index` を渡すとその相手だけへ送る。省略すると全員
 - `join` をもう一度呼ぶと、前の部屋は `close`（reason `"replaced"`）になる
-- 部屋が1通を捨てると `error` が届く。`code` は `"messageTooLarge"`・`"rateLimited"`・`"badFrame"` で、ほかの値が届くこともある。部屋はつながったままで、続けて送れる。部屋が閉じるときは `close` だけが届く
-- 部屋のプロパティ: `peers` / `localPeerId` / `hostPeerId` / `isHost()` / `transport` / `serverTimeMs()` / `lastSeqFrom(peerId)` / `isClosed`
+- 部屋が1通を捨てると `error` が届く。`code` は `"messageTooLarge"`・`"rateLimited"`・`"badFrame"`・`"targetNotAllowed"` で、ほかの値が届くこともある。部屋はつながったままで、続けて送れる。部屋が閉じるときは `close` だけが届く
+- 部屋のプロパティ: `peers` / `localPeerId` / `hostPeerId` / `isHost()` / `maxPeers` / `topology` / `transport` / `serverTimeMs()` / `lastSeqFrom(peerId)` / `isClosed`
+
+#### 定員とつなぎ方
+
+```js
+const joined = await GRush.net.join({ mode: "arena", maxPeers: 12, topology: "hub", hostSelection: "auto" });
+if (joined.ok && joined.value.topology !== "hub") {
+  // 定員と形を知らない古いアプリでは、8 人の mesh の部屋に入る
+}
+```
+
+- `join` は同じ `mode` と定員と形の部屋を選ぶ
+- `maxPeers` は部屋の定員で、1〜100 の整数。省略すると 8
+- `topology` は `"mesh"`（全員が全員へ送る。定員 16 まで）か `"hub"`（ホストへ集める）。省略すると `"mesh"`。`"mesh"` で定員 17 以上は `invalidParams`
+- `targetRoomSize` は 1〜定員の整数
+- `hostSelection: "auto"` を渡すと、GameRush が端末の性能と部屋までの遅延からホストを選ぶ。渡さないと最初に入った参加者がホストになる。どちらでもホストは替わることがあるので、`host` を受け止める
+- `hub` の部屋では、ホスト以外が送れるのはホスト宛てと全員宛て（ホストにだけ届く）だけ。ほかの宛先へは送られず、`error`（`code` は `"targetNotAllowed"`）が届く。ホストには、ほかの参加者の送信が 50ms ごとにまとめて届き、`message` で1件ずつ受ける。送り手ごとの順は保たれる。ホストは結果を全員へ配る
+- `roomCode` で指定した部屋が違う定員か形で既にあるときは `invalidParams`
+- `maxPeers`・`topology`・`hostSelection` のどれかを渡すと、古い GameRush（`protocolVersion` 11 未満）では `unsupported`。`room.maxPeers` と `room.topology` は、`protocolVersion` 11 未満では 8 と `"mesh"`
+- 定員と形を知らない古い GameRush のアプリでは、定員と形が無視されて 8 人の `mesh` の部屋へ入る。このとき `targetRoomSize` に 9 以上を渡すと `invalidParams`。入った部屋は `room.maxPeers` と `room.topology` で確かめる
 
 ## ローカルでの動作確認
 
@@ -336,13 +355,13 @@ if (GRush.backend === "mock") {
 
 `GRush.mock.raiseRoomError(code, message)` は、自分がいる部屋に `error` を届ける（本番と同じく非同期で、部屋は閉じない）。部屋にいなければ `false` を返す。
 
-モックの `join` は GameRush と同じく、`mode`（英数字と `._:-` の1〜32文字）か `roomCode`（英数字の4〜12文字）の形が違うか、`targetRoomSize` が 1〜8 の整数でなければ `invalidParams` で失敗する。部屋が `maxPeers` 人で埋まっていれば `unavailable` で失敗する。
+モックの `join` は GameRush と同じく、`mode`（英数字と `._:-` の1〜32文字）か `roomCode`（英数字の4〜12文字）の形が違うか、`maxPeers`・`topology` が上の規則に合わないか、`targetRoomSize` が 1〜定員の整数でなければ `invalidParams` で失敗する。部屋の人数の上限は、`join` の定員と `GRush.mock.config.maxPeers`（既定 100）の小さいほうで、部屋がその人数で埋まっていれば `unavailable` で失敗する。満員を試すときは `config.maxPeers` を小さくする。`addPeer` で作った相手は、最初の `join` の前なら、その `join` の定員と形の部屋に入る。`hub` の部屋では、ホスト以外の送信を GameRush と同じ宛先に限り、自分の送信がほかの宛先なら `error`（`"targetNotAllowed"`）を届ける（`addPeer` で作った相手の送信は黙って捨てる）。50ms ごとの束ねは再現せず、送信はすぐ届く。`hostSelection` は受け取るが、ホストはいつも番号の最も小さい参加者。
 
-モックの部屋は1つなので、`roomCode` を渡さない `join` の `targetRoomSize` は次のように働く。今の部屋の人数が `targetRoomSize`（`maxPeers` のほうが小さければ `maxPeers`）以上なら、`addPeer` で作った相手を外して `MOCKROOM2`、`MOCKROOM3` … の新しい部屋で始める。それより少なければ今の部屋へ入る。外された相手の `send` はどこへも届かない。部屋数の上限は無いので、GameRush で新しい部屋を作れないときの振り分けは再現しない。
+モックの部屋は1つなので、`roomCode` を渡さない `join` は次のように働く。今の部屋と定員か形が違えば、`addPeer` で作った相手を外して新しい部屋で始める（`roomCode` を渡したときは `invalidParams`）。今の部屋の人数が `targetRoomSize`（部屋の人数の上限のほうが小さければその上限）以上なら、`addPeer` で作った相手を外して `MOCKROOM2`、`MOCKROOM3` … の新しい部屋で始める。それより少なければ今の部屋へ入る。外された相手の `send` はどこへも届かない。部屋数の上限は無いので、GameRush で新しい部屋を作れないときの振り分けは再現しない。
 
 モックは実サーバと同じ縛り（宣言していない key への投稿・値域外・int の枠への小数・公開プレイヤー状態の 4KB と base64 らしい文字列・公開プレイヤー状態とクラウドへ保存するクラウドセーブの、3000 段を超える入れ子と対になっていないサロゲート・ランキングの metadata の同じ誤りと、対になっていないサロゲートを含む operationId・ゲストのクラウドセーブと通報・部屋コードの形式）で弾く。有効プレイ 10 秒未満の投稿と投稿頻度の上限は再現しない。`signedIn: false` のとき `fallback: "local"` 付きのクラウドセーブは、モックの中の端末の保存先に読み書きし（`reset()` で消える）、`signedIn` を `true` に戻すとクラウドへ書けるようになる。共有は確認シートを出さず、`shareStatus`（既定 `"opened"`）をそのまま返す。`launchParams` は GameRush と同じ制限で確かめ、合わなければ `invalidParams`。本文と画像の検査はしないので、弾かれる本文は GameRush 上で確かめる。
 
-アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 10。
+アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 11。
 
 相手探し・受信箱・交換所のモックは、`GRush.mock.rivals` の 3 人の相手を持つ。相手はそれぞれ rating 付きの公開プレイヤー状態を持ち、届いたメッセージを同じ `kind` と `payload` で送り返す。はじめと `reset()` の後は、最初の相手からのメッセージ1通と、相手の受付中の出品を2件持つ。payload・offer・want・give の形、`operationId` での冪等、受付中の出品の上限、受諾の `outcome`、`pending` と `ack` は GameRush と同じ規則で動く。通報を承諾すると（`confirmInboxReport` / `confirmTradeReport`、既定 `true`）相手をブロックし、その相手のメッセージと出品は見えなくなる。
 

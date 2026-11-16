@@ -3,8 +3,24 @@ import { CODES, failure, ok } from "./result.js";
 
 const MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
 const ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
-// GameRush's room capacity, not config.maxPeers: the mock refuses what GameRush refuses.
-const MAX_TARGET_ROOM_SIZE = 8;
+// GameRush's room settings, not config.maxPeers: the mock refuses what GameRush refuses.
+const DEFAULT_ROOM = { maxPeers: 8, topology: "mesh" };
+const MAX_PEERS_LIMIT = 100;
+const MESH_MAX_PEERS = 16;
+
+// Same rules as GameRush: an integer capacity of 1 to 100, "mesh" or "hub", and a mesh of at most 16.
+function roomSettingsOf(params) {
+  const maxPeers = params.maxPeers === undefined ? DEFAULT_ROOM.maxPeers : params.maxPeers;
+  if (!Number.isInteger(maxPeers) || maxPeers < 1 || maxPeers > MAX_PEERS_LIMIT) return null;
+  const topology = params.topology === undefined ? DEFAULT_ROOM.topology : params.topology;
+  if (topology !== "mesh" && topology !== "hub") return null;
+  if (topology === "mesh" && maxPeers > MESH_MAX_PEERS) return null;
+  return { maxPeers, topology };
+}
+
+function sameSettings(a, b) {
+  return a.maxPeers === b.maxPeers && a.topology === b.topology;
+}
 
 function later(callback) {
   setTimeout(callback, 0);
@@ -43,9 +59,17 @@ export function createMockNet(config, localPeerWire) {
   let hostIndex = -1;
   let peerSerial = 0;
   let roomSerial = 1;
+  // The settings of the room the bots are in. null until the game joins, so bots added before the
+  // first join wait in whatever room the game asks for.
+  let settings = null;
+
+  // config.maxPeers lets the author try a full room without filling the room's capacity.
+  function capacity() {
+    return Math.min(settings?.maxPeers ?? MAX_PEERS_LIMIT, config.maxPeers);
+  }
 
   function nextFreeIndex() {
-    for (let index = 0; index < config.maxPeers; index += 1) {
+    for (let index = 0; index < capacity(); index += 1) {
       if (!members.has(index) && index !== localIndex) return index;
     }
     return -1;
@@ -88,7 +112,21 @@ export function createMockNet(config, localPeerWire) {
     const bytes = toBytes(payload);
     if (!bytes) throw new TypeError("Payload must be an ArrayBuffer, a typed array, or a string.");
     const channel = options.channel === "unreliable" ? "unreliable" : "reliable";
-    const to = typeof options.to === "number" ? options.to : -1;
+    let to = typeof options.to === "number" ? options.to : -1;
+    // In a hub room, everyone but the host sends only to the host. A message to everyone goes to the
+    // host, and one to anyone else is dropped with targetNotAllowed, as GameRush does.
+    if (settings?.topology === "hub" && from !== hostIndex) {
+      if (to !== -1 && to !== hostIndex) {
+        if (from === localIndex) {
+          announceToLocal("error", {
+            code: "targetNotAllowed",
+            message: "In a hub room, only the host can send to other players.",
+          });
+        }
+        return;
+      }
+      to = hostIndex;
+    }
     if (channel === "unreliable" && Math.random() < config.unreliableDropRate) return;
     const seq = (outgoingSeq.get(from) ?? 0) + 1;
     outgoingSeq.set(from, seq);
@@ -143,6 +181,7 @@ export function createMockNet(config, localPeerWire) {
     localIndex = -1;
     local.clear();
     hostIndex = lowestIndex();
+    if (members.size === 0) settings = null;
   }
 
   // The mock holds one room, so a room at the target stands for every room being at the target.
@@ -153,6 +192,7 @@ export function createMockNet(config, localPeerWire) {
     outgoingSeq.clear();
     roomSerial += 1;
     roomCode = `MOCKROOM${roomSerial}`;
+    settings = null;
   }
 
   function join(params) {
@@ -166,18 +206,30 @@ export function createMockNet(config, localPeerWire) {
     if (requested !== undefined && !ROOM_CODE_PATTERN.test(requested)) {
       return failure(CODES.invalidParams, "Invalid room code.");
     }
+    const wanted = roomSettingsOf(params);
+    if (!wanted) return failure(CODES.invalidParams, "Invalid room capacity or topology.");
     if (
       target !== undefined &&
-      !(Number.isInteger(target) && target >= 1 && target <= MAX_TARGET_ROOM_SIZE)
+      !(Number.isInteger(target) && target >= 1 && target <= wanted.maxPeers)
     ) {
       return failure(CODES.invalidParams, "Invalid target room size.");
     }
+    if (settings && !sameSettings(settings, wanted)) {
+      // A requested room already exists with other settings. Without a code, GameRush would pick a
+      // room with the asked settings, which is a different room from the one the bots are in.
+      if (requested !== undefined) {
+        return failure(CODES.invalidParams, "The room exists with another capacity or topology.");
+      }
+      startNextRoom();
+    }
+    settings = wanted;
     if (
       requested === undefined &&
       target !== undefined &&
-      members.size >= Math.min(target, config.maxPeers)
+      members.size >= Math.min(target, capacity())
     ) {
       startNextRoom();
+      settings = wanted;
     }
     const index = nextFreeIndex();
     if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
@@ -199,6 +251,8 @@ export function createMockNet(config, localPeerWire) {
       epoch: 1,
       localPeerIndex: index,
       hostIndex,
+      maxPeers: wanted.maxPeers,
+      topology: wanted.topology,
       peers: [...peers, localPeerWire(index)],
       transport: "ws",
       serverTimeMs: Date.now(),
@@ -220,6 +274,7 @@ export function createMockNet(config, localPeerWire) {
     roomCode = "";
     roomSerial = 1;
     hostIndex = -1;
+    settings = null;
   }
 
   return { join, addPeer, removePeer, raiseError, reset };

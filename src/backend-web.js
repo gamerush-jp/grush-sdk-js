@@ -16,6 +16,8 @@ function describeRoom(room) {
     epoch: room.roomEpoch,
     localPeerIndex: room.localPeerId,
     hostIndex: room.hostPeerId,
+    maxPeers: room.maxPeers,
+    topology: room.topology,
     peers: room.peers,
     transport: room.stats ? room.stats.transport : "ws",
     serverTimeMs: typeof room.serverTimeMs === "function" ? room.serverTimeMs() : Date.now(),

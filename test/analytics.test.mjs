@@ -156,9 +156,9 @@ test("outside GameRush every call is false", () => {
   assert.equal(sdk.analytics.logEconomyEvent("source", "coin", 1, 1, "Shop"), false);
 });
 
-test("the mock reports protocol 10, checks, prints and keeps each event", () => {
+test("the mock reports protocol 11, checks, prints and keeps each event", () => {
   useMock();
-  assert.equal(sdk.protocolVersion(), 10);
+  assert.equal(sdk.protocolVersion(), 11);
   assert.equal(sdk.analytics.isAvailable(), true);
   assert.equal(
     sdk.analytics.logOnboardingStep(1, "  tutorial\n", { fields: { route: "a" } }),

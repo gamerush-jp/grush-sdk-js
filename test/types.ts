@@ -1,7 +1,9 @@
 import GRush, {
   createGRush,
+  type GRushJoinOptions,
   type GRushMessage,
   type GRushRoom,
+  type GRushRoomTopology,
   type JsonValue,
 } from "../grush-sdk";
 
@@ -18,6 +20,14 @@ async function useSdk(): Promise<void> {
   const joined = await GRush.net.join({ mode: "duel", targetRoomSize: 4 });
   if (!joined.ok) return;
   const room: GRushRoom = joined.value;
+  const options: GRushJoinOptions = { maxPeers: 12, topology: "hub", hostSelection: "auto" };
+  void GRush.net.join(options);
+  const maxPeers: number = room.maxPeers;
+  const topology: GRushRoomTopology = room.topology;
+  void maxPeers;
+  void topology;
+  // @ts-expect-error topology is mesh or hub
+  void GRush.net.join({ topology: "star" });
   room.on("message", (message: GRushMessage) => {
     void message.json();
   });
