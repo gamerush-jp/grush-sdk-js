@@ -318,6 +318,49 @@ test("rooms wrap the runtime room and normalize its events", async () => {
   assert.equal(runtimeRoom.listenerCount("message"), 0);
 });
 
+test("room settings on join need protocol 11 and reach the runtime as given", async () => {
+  const previous = (await sdk.net.join()).value;
+  assert.equal(previous.maxPeers, 8);
+  assert.equal(previous.topology, "mesh");
+
+  runtime.Info.protocolVersion = 10;
+  const joinsBefore = calls.length;
+  for (const options of [{ maxPeers: 12 }, { topology: "hub" }, { hostSelection: "auto" }]) {
+    assert.equal((await sdk.net.join({ mode: "arena", ...options })).code, "unsupported");
+  }
+  assert.equal(calls.length, joinsBefore);
+  assert.equal(previous.isClosed, false);
+  assert.equal((await sdk.net.join({ mode: "arena", targetRoomSize: 4 })).ok, true);
+
+  runtime.Info.protocolVersion = 11;
+  const plainJoin = runtime.Net.join;
+  runtime.Net.join = (params) =>
+    plainJoin(params).then((room) => {
+      const info = room.describe();
+      room.describe = () => ({ ...info, maxPeers: 12, topology: "hub" });
+      return room;
+    });
+  const room = (
+    await sdk.net.join({
+      mode: "arena",
+      targetRoomSize: 6,
+      maxPeers: 12,
+      topology: "hub",
+      hostSelection: "auto",
+    })
+  ).value;
+  assert.deepEqual(calls.at(-1), [
+    "join",
+    { mode: "arena", targetRoomSize: 6, maxPeers: 12, topology: "hub", hostSelection: "auto" },
+  ]);
+  assert.equal(room.maxPeers, 12);
+  assert.equal(room.topology, "hub");
+
+  // Values are GameRush's to check, so the SDK passes on even ones GameRush refuses.
+  await sdk.net.join({ maxPeers: "12", topology: "star" });
+  assert.deepEqual(calls.at(-1), ["join", { mode: "default", maxPeers: "12", topology: "star" }]);
+});
+
 test("leave asks the runtime and closes the room", async () => {
   const room = (await sdk.net.join()).value;
   assert.deepEqual(calls.at(-1), ["join", { mode: "default" }]);

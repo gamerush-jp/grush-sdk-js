@@ -401,14 +401,53 @@ export type GRushRoomEvents = {
   close: { reason: string };
 };
 
-/** 部屋が1通を捨てた理由。ここに無いコードが届くこともある。 */
-export type GRushRoomErrorCode = "messageTooLarge" | "rateLimited" | "badFrame" | (string & {});
+/**
+ * 部屋が1通を捨てた理由。`targetNotAllowed` は、`hub` の部屋でホスト以外がホスト宛てと全員宛て以外へ送ったとき。
+ * ここに無いコードが届くこともある。
+ */
+export type GRushRoomErrorCode =
+  | "messageTooLarge"
+  | "rateLimited"
+  | "badFrame"
+  | "targetNotAllowed"
+  | (string & {});
+
+/**
+ * 部屋のつなぎ方。`mesh` は全員が全員へ送る（定員 16 まで）。`hub` はホストへ集め、ホスト以外が送れるのは
+ * ホスト宛てと全員宛て（ホストにだけ届く）だけ。ホストには、ほかの参加者の送信が 50ms ごとにまとめて届き、
+ * `message` で1件ずつ受ける。送り手ごとの順は保たれる。ホストは結果を全員へ配る。
+ */
+export type GRushRoomTopology = "mesh" | "hub";
+
+/** `join` の引数。 */
+export type GRushJoinOptions = {
+  mode?: string;
+  roomCode?: string;
+  /** 部屋の目安の人数。1〜定員の整数。 */
+  targetRoomSize?: number;
+  /**
+   * 部屋の定員。1〜100 の整数で、省略すると 8。`maxPeers`・`topology`・`hostSelection` のどれかを渡すと、
+   * `protocolVersion` 11 未満の GameRush では `unsupported`。
+   */
+  maxPeers?: number;
+  /** 部屋のつなぎ方。省略すると `mesh`。`mesh` で定員 17 以上は `invalidParams`。 */
+  topology?: GRushRoomTopology;
+  /**
+   * `"auto"` で、GameRush が端末の性能と部屋までの遅延からホストを選ぶ。省略すると最初に入った参加者がホストになる。
+   * どちらでもホストは替わることがあるので、`host` イベントを受け止める。
+   */
+  hostSelection?: "auto";
+};
 
 export interface GRushRoom {
   readonly roomId: string;
   readonly roomCode: string;
   readonly roomEpoch: number;
   readonly localPeerId: number;
+  /** 部屋の定員。`protocolVersion` 11 未満の GameRush では 8。 */
+  readonly maxPeers: number;
+  /** 部屋のつなぎ方。`protocolVersion` 11 未満の GameRush では `mesh`。 */
+  readonly topology: GRushRoomTopology;
   readonly peers: GRushPeer[];
   readonly hostPeerId: number;
   readonly transport: string;
@@ -436,6 +475,7 @@ export type GRushMockConfig = {
   /** 交換所の通報の確認でプレイヤーが押す答え。 */
   confirmTradeReport: boolean;
   unreliableDropRate: number;
+  /** 満員を試すための、モックの部屋の人数の上限。部屋の定員（`join` の `maxPeers`）より小さければこちらが効く。既定 100。 */
   maxPeers: number;
   shareAvailable: boolean;
   shareStatus: GRushShareStatus;
@@ -743,16 +783,14 @@ export interface GRushSdk {
   };
   net: {
     /**
-     * 部屋へ入る。`targetRoomSize` は部屋の目安の人数で、1〜8 の整数。渡すと、新しい部屋から最大 8 部屋を確かめ、
-     * 目安に届いていない部屋のうち最も人数の少ない部屋へ入る。確かめた部屋がどれも目安以上なら新しい部屋ができる。
-     * 範囲の外は `invalidParams`。`roomCode` で部屋を指定したときは、指定した部屋へ入る。目安を知らない版の
-     * GameRush では無視され、ゲームからは見分けられない。
+     * 部屋へ入る。同じ `mode` と定員と形の部屋を選ぶ。`targetRoomSize` は部屋の目安の人数で、1〜定員の整数。
+     * 渡すと、新しい部屋から最大 8 部屋を確かめ、目安に届いていない部屋のうち最も人数の少ない部屋へ入る。
+     * 確かめた部屋がどれも目安以上なら新しい部屋ができる。範囲の外は `invalidParams`。`roomCode` で部屋を
+     * 指定したときは、指定した部屋へ入り、その部屋が違う定員か形で既にあれば `invalidParams`。目安を知らない版の
+     * GameRush では無視され、ゲームからは見分けられない。定員と形を知らない古い GameRush のアプリでは、定員と形が
+     * 無視されて 8 人の `mesh` の部屋へ入るので、入った部屋は `room.maxPeers` と `room.topology` で確かめる。
      */
-    join(options?: {
-      mode?: string;
-      roomCode?: string;
-      targetRoomSize?: number;
-    }): Promise<GRushResult<GRushRoom>>;
+    join(options?: GRushJoinOptions): Promise<GRushResult<GRushRoom>>;
     readonly room: GRushRoom | null;
   };
   mock: GRushMock;

@@ -23,7 +23,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.14.1";
+export const VERSION = "0.15.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -38,6 +38,10 @@ const LAUNCH_PROTOCOL_VERSION = 8;
 // launchParams on share. Older runtimes drop them and would share a link without them.
 const SHARE_LAUNCH_PROTOCOL_VERSION = 9;
 const PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
+// maxPeers, topology and hostSelection on net.join, and room.maxPeers / room.topology. Older runtimes drop
+// the options and put the game in an 8-player mesh room, which the game could not tell apart.
+const ROOM_CONFIG_PROTOCOL_VERSION = 11;
+const ROOM_CONFIG_OPTIONS = ["maxPeers", "topology", "hostSelection"];
 const BACKENDS = new Set(["auto", "web", "mock", "none"]);
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -401,13 +405,18 @@ export function createGRush(options = {}) {
     async join(rawOptions) {
       const opts = rawOptions ?? {};
       const active = backend();
-      if (!active.isAvailable() || active.protocolVersion() < REQUIRED_PROTOCOL_VERSION) {
+      const roomConfig = ROOM_CONFIG_OPTIONS.filter((name) => opts[name] !== undefined);
+      const minProtocol =
+        roomConfig.length > 0 ? ROOM_CONFIG_PROTOCOL_VERSION : REQUIRED_PROTOCOL_VERSION;
+      if (!active.isAvailable() || active.protocolVersion() < minProtocol) {
         return unsupported();
       }
       closeCurrentRoom("replaced");
       const params = { mode: typeof opts.mode === "string" && opts.mode ? opts.mode : "default" };
       if (typeof opts.roomCode === "string" && opts.roomCode) params.roomCode = opts.roomCode;
       if (opts.targetRoomSize !== undefined) params.targetRoomSize = opts.targetRoomSize;
+      // GameRush checks the values, so they are passed on as they are.
+      for (const name of roomConfig) params[name] = opts[name];
       const result = await active.call("net.join", params);
       if (!result.ok) return result;
       const { source, info } = result.value ?? {};

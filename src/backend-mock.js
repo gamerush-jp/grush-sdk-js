@@ -10,7 +10,7 @@ const MANIFEST_TIMEOUT_MS = 3000;
 // How many analytics events mock.analyticsEvents() keeps, newest last.
 export const MOCK_ANALYTICS_MAX_EVENTS = 200;
 // The newest protocol the mock implements (playerState.onPreview needs 10).
-const MOCK_PROTOCOL_VERSION = 10;
+const MOCK_PROTOCOL_VERSION = 11;
 
 const STORAGE_KEY = "grush-sdk-mock";
 const SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -99,7 +99,7 @@ export function defaultMockConfig() {
     confirmInboxReport: true,
     confirmTradeReport: true,
     unreliableDropRate: 0,
-    maxPeers: 8,
+    maxPeers: 100,
     shareAvailable: true,
     shareStatus: "opened",
     locale: null,

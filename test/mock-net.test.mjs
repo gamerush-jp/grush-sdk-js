@@ -264,3 +264,106 @@ test("removing a stale peer handle does not evict the peer that reused its index
   sdk.mock.definePlayerState("gone", { a: 1 }, { hidden: true });
   assert.equal((await sdk.playerState.report("gone")).code, "invalidParams");
 });
+
+test("mock rooms take the capacity and topology GameRush takes", async () => {
+  sdk.mock.reset();
+  assert.equal(sdk.protocolVersion(), 11);
+  const room = (await sdk.net.join()).value;
+  assert.equal(room.maxPeers, 8);
+  assert.equal(room.topology, "mesh");
+  for (const options of [
+    { maxPeers: 0 },
+    { maxPeers: 101 },
+    { maxPeers: 4.5 },
+    { maxPeers: "8" },
+    { topology: "star" },
+    { maxPeers: 17 },
+    { maxPeers: 17, topology: "mesh" },
+    { maxPeers: 12, targetRoomSize: 13 },
+  ]) {
+    assert.equal((await sdk.net.join(options)).code, "invalidParams", JSON.stringify(options));
+  }
+  const mesh = (await sdk.net.join({ maxPeers: 16, targetRoomSize: 16 })).value;
+  assert.equal(mesh.maxPeers, 16);
+  const hub = (await sdk.net.join({ maxPeers: 100, topology: "hub", hostSelection: "auto" })).value;
+  assert.equal(hub.maxPeers, 100);
+  assert.equal(hub.topology, "hub");
+});
+
+test("the room's capacity bounds the mock room, and config.maxPeers can make it smaller", async () => {
+  sdk.mock.reset();
+  const bots = Array.from({ length: 11 }, (_, n) => sdk.mock.addPeer(`Bot ${n}`));
+  assert.ok(bots.every((bot) => bot !== null));
+  assert.equal((await sdk.net.join({ maxPeers: 12, topology: "hub" })).value.peers.length, 12);
+  assert.equal(sdk.mock.addPeer("Late"), null);
+
+  sdk.mock.reset();
+  sdk.mock.config.maxPeers = 3;
+  sdk.mock.addPeer("A");
+  sdk.mock.addPeer("B");
+  const room = (await sdk.net.join({ maxPeers: 12 })).value;
+  assert.equal(room.maxPeers, 12);
+  assert.equal(room.peers.length, 3);
+  assert.equal(sdk.mock.addPeer("C"), null);
+  await room.leave();
+  assert.notEqual(sdk.mock.addPeer("C"), null);
+  assert.equal((await sdk.net.join({ maxPeers: 12 })).code, "unavailable");
+});
+
+test("a room code with other settings is refused, and without a code the bots stay behind", async () => {
+  sdk.mock.reset();
+  const bot = sdk.mock.addPeer("Bot");
+  const first = (await sdk.net.join({ roomCode: "ABCD", maxPeers: 4 })).value;
+  assert.equal(first.peers.length, 2);
+  assert.equal(
+    (await sdk.net.join({ roomCode: "ABCD", topology: "hub", maxPeers: 4 })).code,
+    "invalidParams",
+  );
+  assert.equal((await sdk.net.join({ roomCode: "ABCD" })).code, "invalidParams");
+  assert.equal((await sdk.net.join({ roomCode: "ABCD", maxPeers: 4 })).value.peers.length, 2);
+
+  const other = (await sdk.net.join({ maxPeers: 6 })).value;
+  assert.equal(other.roomCode, "MOCKROOM2");
+  assert.deepEqual(
+    other.peers.map((peer) => peer.index),
+    [0],
+  );
+  const heard = [];
+  other.on("message", (message) => heard.push(message.text()));
+  bot.send("left behind");
+  await flush();
+  assert.deepEqual(heard, []);
+});
+
+test("in a hub room only the host sends to other players", async () => {
+  sdk.mock.reset();
+  const host = sdk.mock.addPeer("Host");
+  const other = sdk.mock.addPeer("Other");
+  const room = (await sdk.net.join({ maxPeers: 4, topology: "hub" })).value;
+  assert.equal(room.hostPeerId, host.index);
+  const heard = { host: [], other: [] };
+  host.on("message", (message) => heard.host.push([message.from, message.text()]));
+  other.on("message", (message) => heard.other.push([message.from, message.text()]));
+  const received = [];
+  room.on("message", (message) => received.push([message.from, message.text()]));
+  const errors = [];
+  room.on("error", (event) => errors.push(event.code));
+
+  assert.equal(room.send("all").ok, true);
+  assert.equal(room.send("host", { to: host.index }).ok, true);
+  assert.equal(room.send("other", { to: other.index }).ok, true);
+  other.send("bot to me", { to: room.localPeerId });
+  other.send("bot to all");
+  host.send("from host");
+  await flush();
+
+  assert.deepEqual(heard.host, [
+    [room.localPeerId, "all"],
+    [room.localPeerId, "host"],
+    [other.index, "bot to all"],
+  ]);
+  assert.deepEqual(heard.other, [[host.index, "from host"]]);
+  assert.deepEqual(received, [[host.index, "from host"]]);
+  assert.deepEqual(errors, ["targetNotAllowed"]);
+  assert.equal(room.isClosed, false);
+});

@@ -2,6 +2,7 @@ import { decodeJson, decodeText, MAX_MESSAGE_BYTES, toBytes } from "./bytes.js";
 import { peerOf } from "./normalize.js";
 import { CODES, failure, failureFromError, ok } from "./result.js";
 
+const DEFAULT_MAX_PEERS = 8;
 const EVENTS = ["message", "peerjoin", "peerleave", "host", "transportchange", "error", "close"];
 
 export function createRoom(source, info, onClosed) {
@@ -89,6 +90,9 @@ export function createRoom(source, info, onClosed) {
     roomCode: typeof info.roomCode === "string" ? info.roomCode : "",
     roomEpoch: typeof info.epoch === "number" ? info.epoch : 0,
     localPeerId: typeof info.localPeerIndex === "number" ? info.localPeerIndex : 0,
+    // GameRush before protocol 11 has no room settings and puts every game in an 8-player mesh room.
+    maxPeers: typeof info.maxPeers === "number" ? info.maxPeers : DEFAULT_MAX_PEERS,
+    topology: info.topology === "hub" ? "hub" : "mesh",
     get peers() {
       return peers.slice();
     },

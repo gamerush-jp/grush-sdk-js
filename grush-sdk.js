@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.14.1
+/*! GameRush SDK for JavaScript v0.15.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -598,7 +598,20 @@
   // src/mock-net.js
   var MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
   var ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
-  var MAX_TARGET_ROOM_SIZE = 8;
+  var DEFAULT_ROOM = { maxPeers: 8, topology: "mesh" };
+  var MAX_PEERS_LIMIT = 100;
+  var MESH_MAX_PEERS = 16;
+  function roomSettingsOf(params) {
+    const maxPeers = params.maxPeers === void 0 ? DEFAULT_ROOM.maxPeers : params.maxPeers;
+    if (!Number.isInteger(maxPeers) || maxPeers < 1 || maxPeers > MAX_PEERS_LIMIT) return null;
+    const topology = params.topology === void 0 ? DEFAULT_ROOM.topology : params.topology;
+    if (topology !== "mesh" && topology !== "hub") return null;
+    if (topology === "mesh" && maxPeers > MESH_MAX_PEERS) return null;
+    return { maxPeers, topology };
+  }
+  function sameSettings(a, b) {
+    return a.maxPeers === b.maxPeers && a.topology === b.topology;
+  }
   function later(callback) {
     setTimeout(callback, 0);
   }
@@ -635,8 +648,12 @@
     let hostIndex = -1;
     let peerSerial = 0;
     let roomSerial = 1;
+    let settings = null;
+    function capacity() {
+      return Math.min(settings?.maxPeers ?? MAX_PEERS_LIMIT, config.maxPeers);
+    }
     function nextFreeIndex() {
-      for (let index = 0; index < config.maxPeers; index += 1) {
+      for (let index = 0; index < capacity(); index += 1) {
         if (!members.has(index) && index !== localIndex) return index;
       }
       return -1;
@@ -673,7 +690,19 @@
       const bytes = toBytes(payload);
       if (!bytes) throw new TypeError("Payload must be an ArrayBuffer, a typed array, or a string.");
       const channel = options.channel === "unreliable" ? "unreliable" : "reliable";
-      const to = typeof options.to === "number" ? options.to : -1;
+      let to = typeof options.to === "number" ? options.to : -1;
+      if (settings?.topology === "hub" && from !== hostIndex) {
+        if (to !== -1 && to !== hostIndex) {
+          if (from === localIndex) {
+            announceToLocal("error", {
+              code: "targetNotAllowed",
+              message: "In a hub room, only the host can send to other players."
+            });
+          }
+          return;
+        }
+        to = hostIndex;
+      }
       if (channel === "unreliable" && Math.random() < config.unreliableDropRate) return;
       const seq = (outgoingSeq.get(from) ?? 0) + 1;
       outgoingSeq.set(from, seq);
@@ -725,6 +754,7 @@
       localIndex = -1;
       local.clear();
       hostIndex = lowestIndex();
+      if (members.size === 0) settings = null;
     }
     function startNextRoom() {
       for (const peer of members.values()) peer.listeners.clear();
@@ -732,6 +762,7 @@
       outgoingSeq.clear();
       roomSerial += 1;
       roomCode = `MOCKROOM${roomSerial}`;
+      settings = null;
     }
     function join(params) {
       leave();
@@ -742,11 +773,21 @@
       if (requested !== void 0 && !ROOM_CODE_PATTERN.test(requested)) {
         return failure(CODES.invalidParams, "Invalid room code.");
       }
-      if (target !== void 0 && !(Number.isInteger(target) && target >= 1 && target <= MAX_TARGET_ROOM_SIZE)) {
+      const wanted = roomSettingsOf(params);
+      if (!wanted) return failure(CODES.invalidParams, "Invalid room capacity or topology.");
+      if (target !== void 0 && !(Number.isInteger(target) && target >= 1 && target <= wanted.maxPeers)) {
         return failure(CODES.invalidParams, "Invalid target room size.");
       }
-      if (requested === void 0 && target !== void 0 && members.size >= Math.min(target, config.maxPeers)) {
+      if (settings && !sameSettings(settings, wanted)) {
+        if (requested !== void 0) {
+          return failure(CODES.invalidParams, "The room exists with another capacity or topology.");
+        }
         startNextRoom();
+      }
+      settings = wanted;
+      if (requested === void 0 && target !== void 0 && members.size >= Math.min(target, capacity())) {
+        startNextRoom();
+        settings = wanted;
       }
       const index = nextFreeIndex();
       if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
@@ -768,6 +809,8 @@
         epoch: 1,
         localPeerIndex: index,
         hostIndex,
+        maxPeers: wanted.maxPeers,
+        topology: wanted.topology,
         peers: [...peers, localPeerWire(index)],
         transport: "ws",
         serverTimeMs: Date.now()
@@ -787,6 +830,7 @@
       roomCode = "";
       roomSerial = 1;
       hostIndex = -1;
+      settings = null;
     }
     return { join, addPeer, removePeer, raiseError, reset };
   }
@@ -1206,7 +1250,7 @@
   // src/backend-mock.js
   var MANIFEST_TIMEOUT_MS = 3e3;
   var MOCK_ANALYTICS_MAX_EVENTS = 200;
-  var MOCK_PROTOCOL_VERSION = 10;
+  var MOCK_PROTOCOL_VERSION = 11;
   var STORAGE_KEY = "grush-sdk-mock";
   var SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
   var PLAYER_STATE_MAX_BYTES = 4 * 1024;
@@ -1278,7 +1322,7 @@
       confirmInboxReport: true,
       confirmTradeReport: true,
       unreliableDropRate: 0,
-      maxPeers: 8,
+      maxPeers: 100,
       shareAvailable: true,
       shareStatus: "opened",
       locale: null,
@@ -1792,6 +1836,8 @@
       epoch: room.roomEpoch,
       localPeerIndex: room.localPeerId,
       hostIndex: room.hostPeerId,
+      maxPeers: room.maxPeers,
+      topology: room.topology,
       peers: room.peers,
       transport: room.stats ? room.stats.transport : "ws",
       serverTimeMs: typeof room.serverTimeMs === "function" ? room.serverTimeMs() : Date.now()
@@ -2113,6 +2159,7 @@
   }
 
   // src/room.js
+  var DEFAULT_MAX_PEERS = 8;
   var EVENTS = ["message", "peerjoin", "peerleave", "host", "transportchange", "error", "close"];
   function createRoom(source, info, onClosed) {
     const listeners = new Map(EVENTS.map((name) => [name, []]));
@@ -2196,6 +2243,9 @@
       roomCode: typeof info.roomCode === "string" ? info.roomCode : "",
       roomEpoch: typeof info.epoch === "number" ? info.epoch : 0,
       localPeerId: typeof info.localPeerIndex === "number" ? info.localPeerIndex : 0,
+      // GameRush before protocol 11 has no room settings and puts every game in an 8-player mesh room.
+      maxPeers: typeof info.maxPeers === "number" ? info.maxPeers : DEFAULT_MAX_PEERS,
+      topology: info.topology === "hub" ? "hub" : "mesh",
       get peers() {
         return peers.slice();
       },
@@ -2277,7 +2327,7 @@
   }
 
   // src/sdk.js
-  var VERSION = "0.14.1";
+  var VERSION = "0.15.0";
   var REQUIRED_PROTOCOL_VERSION = 1;
   var PLAYER_STATE_PROTOCOL_VERSION = 2;
   var SHARE_PROTOCOL_VERSION = 3;
@@ -2290,6 +2340,8 @@
   var LAUNCH_PROTOCOL_VERSION = 8;
   var SHARE_LAUNCH_PROTOCOL_VERSION = 9;
   var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
+  var ROOM_CONFIG_PROTOCOL_VERSION = 11;
+  var ROOM_CONFIG_OPTIONS = ["maxPeers", "topology", "hostSelection"];
   var BACKENDS = /* @__PURE__ */ new Set(["auto", "web", "mock", "none"]);
   var LOCAL_HOSTNAMES = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
   var noneBackend = {
@@ -2588,13 +2640,16 @@
       async join(rawOptions) {
         const opts = rawOptions ?? {};
         const active = backend();
-        if (!active.isAvailable() || active.protocolVersion() < REQUIRED_PROTOCOL_VERSION) {
+        const roomConfig = ROOM_CONFIG_OPTIONS.filter((name) => opts[name] !== void 0);
+        const minProtocol = roomConfig.length > 0 ? ROOM_CONFIG_PROTOCOL_VERSION : REQUIRED_PROTOCOL_VERSION;
+        if (!active.isAvailable() || active.protocolVersion() < minProtocol) {
           return unsupported();
         }
         closeCurrentRoom("replaced");
         const params = { mode: typeof opts.mode === "string" && opts.mode ? opts.mode : "default" };
         if (typeof opts.roomCode === "string" && opts.roomCode) params.roomCode = opts.roomCode;
         if (opts.targetRoomSize !== void 0) params.targetRoomSize = opts.targetRoomSize;
+        for (const name of roomConfig) params[name] = opts[name];
         const result = await active.call("net.join", params);
         if (!result.ok) return result;
         const { source, info } = result.value ?? {};
