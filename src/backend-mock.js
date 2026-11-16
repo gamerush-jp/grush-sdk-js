@@ -3,14 +3,15 @@ import { gameJsonError } from "./game-json.js";
 import { createMockLeaderboards } from "./mock-leaderboards.js";
 import { MANIFEST_PATH, parseLeaderboardManifest } from "./mock-manifest.js";
 import { createMockNet } from "./mock-net.js";
+import { createMockShop } from "./mock-shop.js";
 import { MOCK_RIVALS, createMockSocial } from "./mock-social.js";
 import { CODES, failure, ok } from "./result.js";
 
 const MANIFEST_TIMEOUT_MS = 3000;
 // How many analytics events mock.analyticsEvents() keeps, newest last.
 export const MOCK_ANALYTICS_MAX_EVENTS = 200;
-// The newest protocol the mock implements (playerState.onPreview needs 10).
-const MOCK_PROTOCOL_VERSION = 11;
+// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 12).
+const MOCK_PROTOCOL_VERSION = 12;
 
 const STORAGE_KEY = "grush-sdk-mock";
 const SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -104,6 +105,9 @@ export function defaultMockConfig() {
     shareStatus: "opened",
     locale: null,
     launchParams: {},
+    shopEnabled: true,
+    shopProducts: [],
+    shopPurchaseStatus: "redirecting",
   };
 }
 
@@ -316,6 +320,7 @@ export function createMockBackend(config) {
   }
 
   const net = createMockNet(config, localPeerWire);
+  const shop = createMockShop({ config });
   const leaderboards = createMockLeaderboards(() => {
     const { index: _index, ...identity } = localPeerWire(-1);
     return { ...identity, isGuest: !config.signedIn };
@@ -603,6 +608,11 @@ export function createMockBackend(config) {
     "trade.cancel": social.handlers.cancel,
     "trade.ack": social.handlers.ack,
     "trade.report": social.handlers.reportTrade,
+    "shop.products": shop.handlers.products,
+    "shop.purchase": shop.handlers.purchase,
+    "shop.pending": shop.handlers.pending,
+    "shop.ack": shop.handlers.ack,
+    "shop.owned": shop.handlers.owned,
     "cloudSave.load": loadCloud,
     "cloudSave.save": saveCloud,
     "cloudSave.remove": removeCloud,
@@ -650,6 +660,7 @@ export function createMockBackend(config) {
       analyticsWarned.clear();
       myState = null;
       preview.reset();
+      shop.reset();
       net.reset();
       Object.assign(config, defaultMockConfig());
       writeStored({ consent: false });
@@ -664,6 +675,7 @@ export function createMockBackend(config) {
     localeCurrent: () => mockLocale(config),
     localeOnChange: () => () => {},
     playerStateOnPreview: (handler) => preview.onPreview(handler),
+    shopOnPending: (handler) => shop.onPending(handler),
     launchCurrent: () => mockLaunch(config),
     analyticsAvailable: () => true,
     logAnalytics,

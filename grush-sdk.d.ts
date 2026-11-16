@@ -249,6 +249,45 @@ export type GRushTradePage = {
   nextCursor: string | null;
 };
 
+export type GRushShopProduct = {
+  /** 作者が付けた商品の識別子（`^[a-z0-9][a-z0-9_.-]{0,63}$`）。 */
+  sku: string;
+  /** 商品名（30 字まで）。 */
+  name: string;
+  /** 税込みの価格（円）。 */
+  priceJpy: number;
+};
+
+export type GRushShopProducts = {
+  /** いま買えるか。アプリと LINE、作者の販売が開いていないとき、販売を止めているときは `false` で、`products` は空。 */
+  enabled: boolean;
+  products: GRushShopProduct[];
+};
+
+/**
+ * `redirecting`: ページがすぐ決済画面へ移る。`cancelled`: プレイヤーが購入をやめた。`alreadyOwned`: もう持っている。
+ * 知らない値が増えても読めるよう、文字列のまま渡す。
+ */
+export type GRushShopPurchaseStatus = "redirecting" | "cancelled" | "alreadyOwned" | (string & {});
+
+export type GRushShopPurchaseResult = { status: GRushShopPurchaseStatus };
+
+/** 支払いで届いたアイテム。 */
+export type GRushShopGrant = {
+  /** 付与の ID（uuid）。`ack` に渡す。 */
+  id: string;
+  sku: string;
+  createdAt: string;
+};
+
+export type GRushShopOwnedGrant = GRushShopGrant & {
+  /** ゲームが `ack` 済みか。 */
+  acked: boolean;
+};
+
+/** 決済から戻って付与が届いたときの合図。 */
+export type GRushShopPendingEvent = { sku: string };
+
 /**
  * セーブの置き場所。`"local"` は、GameRush がプレイヤーのサインインを確かめられず、端末
  * （ブラウザの保存領域）に置いたことを表す。`fallback: "local"` を渡したときだけ現れる。
@@ -482,6 +521,12 @@ export type GRushMockConfig = {
   locale: string | null;
   /** `launch` が返す起動パラメータ。モックは GameRush の制限で確かめずにそのまま返す。 */
   launchParams: Record<string, string>;
+  /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unsupported` で失敗する（アプリと LINE と同じ）。既定 `true`。 */
+  shopEnabled: boolean;
+  /** `shop.products` が返す商品。sku・名前・整数の価格がそろわないものは外す。既定は空。 */
+  shopProducts: GRushShopProduct[];
+  /** `shop.purchase` の答え。`"cancelled"` にすると付与せずに `cancelled` を返す。既定 `"redirecting"`。 */
+  shopPurchaseStatus: "redirecting" | "cancelled";
 };
 
 export interface GRushMockPeer {
@@ -676,6 +721,42 @@ export interface GRushSdk {
      * その相手のメッセージと出品は見えなくなる。ゲストは `signInRequired`。
      */
     report(tradeId: string): Promise<GRushResult<boolean>>;
+  };
+  /**
+   * 作者のアイテムの販売。作者が Studio か API キーで登録した商品を、プレイヤーが Web の GameRush で買う。
+   * サーバが保証するのは、払ったプレイヤーにアイテムが届くことまで。ゲームの中での使用は改ざんを防げない。
+   *
+   * 取りこぼさないために、次の順で使う。
+   * 1. `purchase` を呼ぶ前にセーブしておく。`redirecting` が返ると、ページはすぐ決済画面へ移る。
+   * 2. 起動したときと `onPending` が呼ばれたときに `pending` を読む。
+   * 3. 届いたアイテムをセーブに反映して保存してから `ack` する。`ack` するまで `pending` に残る。
+   *
+   * `protocolVersion` 12 未満の GameRush と GameRush の外では、どれも `unsupported`。
+   */
+  shop: {
+    /** 商品の一覧。アプリと LINE では `enabled: false` の空。 */
+    products(): Promise<GRushResult<GRushShopProducts>>;
+    /**
+     * 商品を買う。買えるのは Web の GameRush だけで、アプリと LINE では `unsupported`。sku の形が違えば GameRush へ
+     * 送らずに `invalidParams`。ゲストは `signInRequired`。
+     */
+    purchase(sku: string): Promise<GRushResult<GRushShopPurchaseResult>>;
+    /** 届いたが、まだ `ack` していない付与（古い順に、1 回に最大 100 件）。`ack` したら、残りがあればもう一度読む。 */
+    pending(): Promise<GRushResult<GRushShopGrant[]>>;
+    /**
+     * 付与の受け取りを確かめ、記録した件数を返す。`ids` が 1〜100 件の付与 ID（uuid）でなければ、GameRush へ送らずに
+     * `invalidParams`。
+     */
+    ack(ids: string[]): Promise<GRushResult<number>>;
+    /** このプレイヤーがこのゲームで受けた付与のすべて。 */
+    owned(): Promise<GRushResult<GRushShopOwnedGrant[]>>;
+    /**
+     * 決済から戻って付与が届いたときに `handler` を呼ぶ。返り値は解除関数。登録より先に届いていた合図は、
+     * 登録したときに1回だけ渡るので、起動したらすぐ登録する。合図を受けたら `pending` を読む。
+     * `protocolVersion` 12 未満の GameRush と GameRush の外では呼ばれない。
+     * `configure({ backend })` でバックエンドを切り替えても購読は続く。
+     */
+    onPending(handler: (event: GRushShopPendingEvent) => void): () => void;
   };
   cloudSave: {
     /**

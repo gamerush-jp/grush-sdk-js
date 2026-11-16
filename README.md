@@ -1,6 +1,6 @@
 # GameRush SDK for JavaScript
 
-GameRush の GameAPI（ランキング・公開プレイヤー状態と相手探し・受信箱・交換所・クラウドセーブ・共有・表示言語・起動パラメータ・アナリティクス・リアルタイム対戦）を、素の `index.html` のゲームから呼ぶためのラッパー。バンドラ不要で、script タグ 1 行でも ES Modules の `import` でも使える。使い方の正（投稿が弾かれる条件とエラーコード・API トークン）は [SDK ガイド](https://gamerush.jp/sdk)。
+GameRush の GameAPI（ランキング・公開プレイヤー状態と相手探し・受信箱・交換所・アイテムの販売・クラウドセーブ・共有・表示言語・起動パラメータ・アナリティクス・リアルタイム対戦）を、素の `index.html` のゲームから呼ぶためのラッパー。バンドラ不要で、script タグ 1 行でも ES Modules の `import` でも使える。使い方の正（投稿が弾かれる条件とエラーコード・API トークン）は [SDK ガイド](https://gamerush.jp/sdk)。
 
 GameRush はアップロードされた全ビルドへランタイム JS（`window.GRushPlayer` など）を注入している。この SDK はその上に薄く乗り、次の 3 つを足す。
 
@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.15.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.16.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -66,6 +66,8 @@ TypeScript の型は `grush-sdk.d.ts`。
 | `GRush.playerState.onPreview(handler)` | 解除関数（確認用の表示で、公開状態を描くよう頼まれたときに `handler` を呼ぶ。下記） |
 | `GRush.inbox.send(to, kind, payload)` / `list({ unreadOnly, limit, cursor })` / `markRead(ids)` / `remove(ids)` / `report(messageId)` | `true` / `{ messages, unreadCount, nextCursor }` / 件数 / 件数 / 承諾されたか（下記） |
 | `GRush.trade.create({ offer, want, offerKey, wantKey, to, expiresInSec, operationId })` / `list(...)` / `mine()` / `accept(tradeId, give)` / `cancel(tradeId)` / `ack(ids)` / `report(tradeId)` | 出品 / `{ trades, nextCursor }` / `{ open, pending }` / `{ outcome, trade }` / 出品 / 件数 / 承諾されたか（下記） |
+| `GRush.shop.products()` / `purchase(sku)` / `pending()` / `ack(ids)` / `owned()` | `{ enabled, products }` / `{ status }` / 付与の配列 / 件数 / 付与の配列（アイテムの販売。下記） |
+| `GRush.shop.onPending(handler)` | 解除関数（決済から戻って付与が届いたときに `handler` を呼ぶ。下記） |
 | `GRush.cloudSave.load(slot, { fallback })` / `save(payload, slot, { baseRevision, fallback })` / `remove(slot, { fallback })` | `{ slot, payload, revision, createdAt, updatedAt, storage }` など（下記） |
 | `GRush.share.share({ text, image, launchParams })` | `{ status: "opened" \| "cancelled" }`（下記） |
 | `GRush.share.isAvailable()` | `true` / `false`（結果オブジェクトではなく真偽値。失敗しない） |
@@ -207,6 +209,47 @@ if (mine.ok) {
 - `list` は他人の公開の出品と自分宛ての指名の出品のうち、受付中のもの（新しい順）。`offerKey` / `wantKey` で絞る。`give` は当事者にだけ入る
 - `report(tradeId)` は GameRush が確認を出し、承諾されたら `true`。通報すると出品者をブロックする。ゲストは `signInRequired`
 - 古い GameRush（`protocolVersion` 7 未満）では `unsupported`
+
+### アイテムの販売
+
+```js
+// 起動したときと、決済から戻って付与が届いたときに、届いたアイテムをセーブへ反映してから ack する。
+// pending は 1 回に最大 100 件なので、ack したら残りが無くなるまで読み直す。
+async function receiveItems() {
+  for (;;) {
+    const pending = await GRush.shop.pending();
+    if (!pending.ok || pending.value.length === 0) return;
+    const fresh = pending.value.filter((grant) => !save.appliedGrants.includes(grant.id));
+    for (const grant of fresh) {
+      giveItem(save, grant.sku);
+      save.appliedGrants.push(grant.id);
+    }
+    const saved = await GRush.cloudSave.save(save);
+    if (!saved.ok) return;
+    const acked = await GRush.shop.ack(pending.value.map((grant) => grant.id)); // 1 回 100 件まで
+    if (!acked.ok || pending.value.length < 100) return;
+  }
+}
+GRush.shop.onPending(() => receiveItems());
+receiveItems();
+
+const shop = await GRush.shop.products();
+if (shop.ok && shop.value.enabled) showShop(shop.value.products); // { sku, name, priceJpy }
+
+// 買う前にセーブする。redirecting が返ると、ページはすぐ決済画面へ移る。
+await GRush.cloudSave.save(save);
+const bought = await GRush.shop.purchase("gem_pack");
+```
+
+- 作者が Studio か API キーで登録した商品（sku・商品名・税込みの価格）を、プレイヤーが買う。ゲームは `products()` で一覧を読む
+- **買えるのは Web の GameRush だけ。** アプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空。作者の販売が開いていないときも `enabled: false` の空。`pending`・`ack`・`owned` も今はアプリと LINE では `unsupported`（Web で買った分は Web で受け取る）
+- `purchase(sku)` の `status` は `redirecting`（ページがすぐ決済画面へ移る）・`cancelled`（プレイヤーがやめた）・`alreadyOwned`（もう持っている）。**ゲームは `purchase` を呼ぶ前にセーブしておく。** sku が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ GameRush へ送らずに `invalidParams`。ゲストは `signInRequired`
+- **付与は `ack` するまで `pending` に残る。** アイテムをセーブに反映して保存してから `ack(ids)` する。`ids` は 1〜100 件の付与 ID で、合わなければ GameRush へ送らずに `invalidParams`。`pending` は 1 回に最大 100 件（古い順）なので、`ack` したら、残りがあればもう一度読む。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む。反映済みの付与 ID をセーブに持てば、同じ付与を二度反映しない
+- `onPending(handler)` は、決済から戻って付与が届いたときに `{ sku }` で1回呼ばれる。登録より先に届いていた合図は、登録したときに1回だけ渡るので、起動したらすぐ登録する。返り値は解除関数。`handler` はそれぞれ別の複製を受け取り、`GRush.configure({ backend })` でバックエンドを切り替えても購読は続く
+- `owned()` は、このプレイヤーがこのゲームで受けた付与のすべて（`ack` 済みかを `acked` で返す）
+- サーバが保証するのは、払ったプレイヤーにアイテムが届くことまで。ゲームの中での使用は改ざんを防げない
+- 呼びすぎは `rateLimited`（`retryAfterMs` 付き）。`purchase` は答えを最大 10 分待ち、過ぎると `timeout`
+- 古い GameRush（`protocolVersion` 12 未満）では、どれも `unsupported` で、`onPending` の `handler` は呼ばれない
 
 ### 共有
 
@@ -361,7 +404,7 @@ if (GRush.backend === "mock") {
 
 モックは実サーバと同じ縛り（宣言していない key への投稿・値域外・int の枠への小数・公開プレイヤー状態の 4KB と base64 らしい文字列・公開プレイヤー状態とクラウドへ保存するクラウドセーブの、3000 段を超える入れ子と対になっていないサロゲート・ランキングの metadata の同じ誤りと、対になっていないサロゲートを含む operationId・ゲストのクラウドセーブと通報・部屋コードの形式）で弾く。有効プレイ 10 秒未満の投稿と投稿頻度の上限は再現しない。`signedIn: false` のとき `fallback: "local"` 付きのクラウドセーブは、モックの中の端末の保存先に読み書きし（`reset()` で消える）、`signedIn` を `true` に戻すとクラウドへ書けるようになる。共有は確認シートを出さず、`shareStatus`（既定 `"opened"`）をそのまま返す。`launchParams` は GameRush と同じ制限で確かめ、合わなければ `invalidParams`。本文と画像の検査はしないので、弾かれる本文は GameRush 上で確かめる。
 
-アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 11。
+アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 12。
 
 相手探し・受信箱・交換所のモックは、`GRush.mock.rivals` の 3 人の相手を持つ。相手はそれぞれ rating 付きの公開プレイヤー状態を持ち、届いたメッセージを同じ `kind` と `payload` で送り返す。はじめと `reset()` の後は、最初の相手からのメッセージ1通と、相手の受付中の出品を2件持つ。payload・offer・want・give の形、`operationId` での冪等、受付中の出品の上限、受諾の `outcome`、`pending` と `ack` は GameRush と同じ規則で動く。通報を承諾すると（`confirmInboxReport` / `confirmTradeReport`、既定 `true`）相手をブロックし、その相手のメッセージと出品は見えなくなる。
 
@@ -374,6 +417,13 @@ GRush.mock.acceptTrade(created.value.id, { item: "gem" }); // 相手が受けて
 GRush.mock.expireTrade(listing.id);
 GRush.mock.definePlayerState("custom-rival", { level: 3 }, { rating: 1300 });
 GRush.mock.previewPlayerState("custom-rival", { level: 3 }, { rating: 1300 });
+```
+
+アイテムの販売のモックは、決済を飛ばす。`GRush.mock.config.shopProducts`（既定は空）に置いた商品を `products()` が返し、`purchase(sku)` はすぐ付与を `pending` に積んで `redirecting` を返し、`onPending` の `handler` を呼ぶ（非同期）。ページは移らない。持っている sku は `alreadyOwned`、一覧に無い sku は `invalidParams`、`signedIn: false` では `signInRequired`。`config.shopPurchaseStatus = "cancelled"` で付与せずに `cancelled` を、`config.shopEnabled = false` で Web 以外の面と同じく `enabled: false` の空を返す（`purchase` はアプリ・LINE と同じく `unsupported`）。`pending` は GameRush と同じく 1 回に最大 100 件を返す。呼び出しの間隔の上限は再現しない。付与は `reset()` で消える。
+
+```js
+GRush.mock.config.shopProducts = [{ sku: "gem_pack", name: "宝石 100 個", priceJpy: 120 }];
+await GRush.shop.purchase("gem_pack"); // onPending が { sku: "gem_pack" } で呼ばれ、pending に載る
 ```
 
 `GRush.mock.previewPlayerState(pseudoId, payload, { revision, rating })` は、`GRush.playerState.onPreview` の `handler` に確認用の表示の状態を渡す。渡すのは呼び出しの後（非同期）で、`handler` が無ければ次に登録したときに渡す。`revision` は省略すると 1、`rating` は省略すると `null`。形が合わなければ何もせず `false` を返す。

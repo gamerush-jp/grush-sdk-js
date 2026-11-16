@@ -228,3 +228,43 @@ export function launchOf(raw) {
     ),
   };
 }
+
+// GameRush checks the sku, name and price when the author registers a product, so only the shape is kept.
+function shopProductOf(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
+  return { sku: raw.sku, name: text(raw.name), priceJpy: number(raw.priceJpy) };
+}
+
+export function shopProductsOf(raw) {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.products)) return null;
+  const enabled = raw.enabled === true;
+  // A shop that is not open sells nothing, so its list is empty even if the runtime sent one.
+  return {
+    enabled,
+    products: enabled
+      ? raw.products.map(shopProductOf).filter((product) => product !== null)
+      : [],
+  };
+}
+
+export function shopPurchaseOf(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.status !== "string" || !raw.status) return null;
+  // A status this SDK does not know yet is passed through as is, so a newer GameRush still reads.
+  return { status: raw.status };
+}
+
+export function shopGrantOf(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id) return null;
+  if (typeof raw.sku !== "string" || !raw.sku) return null;
+  return { id: raw.id, sku: raw.sku, createdAt: text(raw.createdAt) };
+}
+
+export function ownedShopGrantOf(raw) {
+  const grant = shopGrantOf(raw);
+  return grant ? { ...grant, acked: raw.acked === true } : null;
+}
+
+export function shopPendingEventOf(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
+  return { sku: raw.sku };
+}
