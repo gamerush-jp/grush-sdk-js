@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.15.0
+/*! GameRush SDK for JavaScript v0.16.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -843,11 +843,113 @@
     };
   }
 
+  // src/mock-shop.js
+  var SKU = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
+  var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  var ACK_MAX_IDS = 100;
+  function uuid() {
+    const crypto = globalThis.crypto;
+    if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+    const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(
+      ""
+    );
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+  }
+  function invalid(message) {
+    return failure(CODES.invalidParams, message);
+  }
+  function productsOf(config) {
+    const list = Array.isArray(config.shopProducts) ? config.shopProducts : [];
+    return list.filter(
+      (product) => product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && Number.isInteger(product.priceJpy)
+    ).map(({ sku, name, priceJpy }) => ({ sku, name, priceJpy }));
+  }
+  function createMockShop({ config, now = () => Date.now() }) {
+    let grants = [];
+    const signals = [];
+    let handler = null;
+    let token = null;
+    let scheduled = false;
+    const enabled = () => config.shopEnabled !== false;
+    const grantWire = ({ id, sku, createdAt }) => ({ id, sku, createdAt });
+    function deliver() {
+      scheduled = false;
+      while (handler && signals.length > 0) {
+        const signal = signals.shift();
+        try {
+          handler(signal);
+        } catch {
+        }
+      }
+    }
+    function schedule() {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(deliver);
+    }
+    function products() {
+      if (!enabled()) return ok({ enabled: false, products: [] });
+      return ok({ enabled: true, products: productsOf(config) });
+    }
+    function purchase({ sku }) {
+      if (typeof sku !== "string" || !SKU.test(sku)) return invalid("Invalid sku.");
+      if (!enabled()) return failure(CODES.unavailable, "The shop of this game is not open.");
+      if (!config.signedIn) return failure(CODES.signInRequired, "Purchases require sign-in.");
+      if (!productsOf(config).some((product) => product.sku === sku)) {
+        return invalid("No product for that sku.");
+      }
+      if (grants.some((grant) => grant.sku === sku)) return ok({ status: "alreadyOwned" });
+      if (config.shopPurchaseStatus === "cancelled") return ok({ status: "cancelled" });
+      grants.push({ id: uuid(), sku, createdAt: new Date(now()).toISOString(), acked: false });
+      signals.push({ sku });
+      schedule();
+      return ok({ status: "redirecting" });
+    }
+    const pending = () => ok(grants.filter((grant) => !grant.acked).map(grantWire));
+    function ack({ ids }) {
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > ACK_MAX_IDS) {
+        return invalid(`ids must be 1 to ${ACK_MAX_IDS} grant ids.`);
+      }
+      const wanted = /* @__PURE__ */ new Set();
+      for (const id of ids) {
+        if (typeof id !== "string" || !UUID.test(id)) return invalid("ids must be grant ids.");
+        wanted.add(id.toLowerCase());
+      }
+      let acked = 0;
+      for (const grant of grants) {
+        if (grant.acked || !wanted.has(grant.id.toLowerCase())) continue;
+        grant.acked = true;
+        acked += 1;
+      }
+      return ok(acked);
+    }
+    const owned = () => ok(grants.map((grant) => ({ ...grantWire(grant), acked: grant.acked })));
+    function onPending(next) {
+      const own = {};
+      handler = next;
+      token = own;
+      schedule();
+      return () => {
+        if (token !== own) return;
+        handler = null;
+        token = null;
+      };
+    }
+    return {
+      handlers: { products, purchase, pending, ack, owned },
+      onPending,
+      reset() {
+        grants = [];
+        signals.length = 0;
+      }
+    };
+  }
+
   // src/mock-social.js
   var TOKEN = /^[A-Za-z0-9_.:-]{1,32}$/;
   var KEY = /^[A-Za-z0-9._:-]{1,32}$/;
   var OPERATION_ID = /^[A-Za-z0-9._:-]{1,64}$/;
-  var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   var MAX_DEPTH = 4;
   var MAX_SCALARS = 64;
   var INBOX_MAX_BYTES = 1024;
@@ -905,7 +1007,7 @@
     if (!Array.isArray(value) || value.length === 0 || value.length > MAX_IDS) return null;
     const ids = /* @__PURE__ */ new Set();
     for (const entry of value) {
-      if (typeof entry !== "string" || !UUID.test(entry)) return null;
+      if (typeof entry !== "string" || !UUID2.test(entry)) return null;
       ids.add(entry.toLowerCase());
     }
     return ids;
@@ -914,7 +1016,7 @@
     if (value === void 0 || value === null) return DEFAULT_LIMIT;
     return Number.isInteger(value) && value >= 1 && value <= MAX_LIMIT ? value : null;
   }
-  function uuid() {
+  function uuid2() {
     const crypto = globalThis.crypto;
     if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
     const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(
@@ -922,7 +1024,7 @@
     );
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
   }
-  function invalid(message) {
+  function invalid2(message) {
     return failure(CODES.invalidParams, message);
   }
   function copy(value) {
@@ -947,7 +1049,7 @@
     function deliver(from, kind, payload) {
       if (blocked.has(from)) return;
       messages.push({
-        id: uuid(),
+        id: uuid2(),
         from,
         kind,
         payload: copy(payload),
@@ -963,22 +1065,22 @@
       return copy(message);
     }
     function send({ to, kind, payload }) {
-      if (typeof to !== "string" || !to) return invalid("Invalid recipient.");
-      if (to === selfId()) return invalid("Cannot send a message to yourself.");
-      if (!isKnownPlayer(to)) return invalid("No player with that id.");
-      if (typeof kind !== "string" || !KEY.test(kind)) return invalid("Invalid kind.");
+      if (typeof to !== "string" || !to) return invalid2("Invalid recipient.");
+      if (to === selfId()) return invalid2("Cannot send a message to yourself.");
+      if (!isKnownPlayer(to)) return invalid2("No player with that id.");
+      if (typeof kind !== "string" || !KEY.test(kind)) return invalid2("Invalid kind.");
       const error = payloadError(payload, INBOX_MAX_BYTES, "Inbox payload");
-      if (error) return invalid(error);
+      if (error) return invalid2(error);
       deliver(to, kind, payload);
       return ok(true);
     }
     function list({ unreadOnly, limit, cursor }) {
       const size = limitOf(limit);
-      if (size === null) return invalid("Invalid limit.");
+      if (size === null) return invalid2("Invalid limit.");
       const visible = visibleMessages();
       const filtered = unreadOnly === true ? visible.filter((message) => !message.readAt) : visible;
       const found = pageOf(filtered, size, cursor);
-      if (!found) return invalid("Invalid cursor.");
+      if (!found) return invalid2("Invalid cursor.");
       return ok({
         messages: found.page.map(messageWire),
         unreadCount: visible.filter((message) => !message.readAt).length,
@@ -987,7 +1089,7 @@
     }
     function updateMessages(rawIds, apply) {
       const ids = idsOf(rawIds);
-      if (!ids) return invalid("ids must be 1 to 50 message ids.");
+      if (!ids) return invalid2("ids must be 1 to 50 message ids.");
       let updated = 0;
       for (const message of visibleMessages()) {
         if (ids.has(message.id.toLowerCase()) && apply(message)) updated += 1;
@@ -1006,7 +1108,7 @@
     function reportMessage({ messageId }) {
       if (!config.signedIn) return failure(CODES.signInRequired, "Reporting requires sign-in.");
       const target = visibleMessages().find((message) => message.id === messageId);
-      if (!target) return invalid("No message for that id.");
+      if (!target) return invalid2("No message for that id.");
       if (config.confirmInboxReport !== true) return ok(false);
       blocked.add(target.from);
       return ok(true);
@@ -1028,7 +1130,7 @@
     function openTrade(from, { offer, want, offerKey, wantKey, to, expiresInSec, operationId }) {
       const createdAt = now();
       const trade = {
-        id: uuid(),
+        id: uuid2(),
         from,
         to: to ?? null,
         taker: null,
@@ -1066,15 +1168,15 @@
     }
     function create(p) {
       const error = tradeOptionsError(p);
-      if (error) return invalid(error);
+      if (error) return invalid2(error);
       if (typeof p.operationId !== "string" || !OPERATION_ID.test(p.operationId)) {
-        return invalid("Invalid operationId.");
+        return invalid2("Invalid operationId.");
       }
       const self = selfId();
       if (p.to !== void 0 && p.to !== null) {
-        if (typeof p.to !== "string" || !p.to) return invalid("Invalid recipient.");
-        if (p.to === self) return invalid("Cannot offer a trade to yourself.");
-        if (!isKnownPlayer(p.to)) return invalid("No player with that id.");
+        if (typeof p.to !== "string" || !p.to) return invalid2("Invalid recipient.");
+        if (p.to === self) return invalid2("Cannot offer a trade to yourself.");
+        if (!isKnownPlayer(p.to)) return invalid2("No player with that id.");
       }
       const existing = trades.find(
         (trade) => trade.from === self && trade.operationId === p.operationId
@@ -1089,14 +1191,14 @@
     }
     function listTrades({ offerKey, wantKey, limit, cursor }) {
       const size = limitOf(limit);
-      if (size === null) return invalid("Invalid limit.");
+      if (size === null) return invalid2("Invalid limit.");
       expireDue();
       const self = selfId();
       const visible = trades.filter(
         (trade) => trade.status === "open" && trade.from !== self && (trade.to === null || trade.to === self) && !blocked.has(trade.from) && (offerKey === void 0 || offerKey === null || trade.offerKey === offerKey) && (wantKey === void 0 || wantKey === null || trade.wantKey === wantKey)
       ).reverse();
       const found = pageOf(visible, size, cursor);
-      if (!found) return invalid("Invalid cursor.");
+      if (!found) return invalid2("Invalid cursor.");
       return ok({ trades: found.page.map(tradeWire), nextCursor: found.nextCursor });
     }
     function pendingOf(trade, self) {
@@ -1135,9 +1237,9 @@
       return { outcome: "matched", trade };
     }
     function accept({ tradeId, give }) {
-      if (typeof tradeId !== "string" || !tradeId) return invalid("Invalid tradeId.");
+      if (typeof tradeId !== "string" || !tradeId) return invalid2("Invalid tradeId.");
       const error = payloadError(give, GIVE_MAX_BYTES, "Trade give");
-      if (error) return invalid(error);
+      if (error) return invalid2(error);
       const settled = settle(tradeId, give, selfId());
       return ok(
         settled.trade ? { outcome: settled.outcome, trade: tradeWire(settled.trade) } : { outcome: settled.outcome, trade: null }
@@ -1146,7 +1248,7 @@
     function cancel({ tradeId }) {
       expireDue();
       const trade = trades.find((entry) => entry.id === tradeId && entry.from === selfId());
-      if (!trade) return invalid("No trade of yours for that id.");
+      if (!trade) return invalid2("No trade of yours for that id.");
       if (trade.status === "open") {
         trade.status = "cancelled";
         trade.settledAt = iso(now());
@@ -1155,7 +1257,7 @@
     }
     function ack({ ids: rawIds }) {
       const ids = idsOf(rawIds);
-      if (!ids) return invalid("ids must be 1 to 50 trade ids.");
+      if (!ids) return invalid2("ids must be 1 to 50 trade ids.");
       expireDue();
       const self = selfId();
       let acked = 0;
@@ -1172,7 +1274,7 @@
       const self = selfId();
       const trade = trades.find((entry) => entry.id === tradeId);
       const listed = trade && trade.status === "open" && trade.from !== self && (trade.to === null || trade.to === self);
-      if (!trade || !(listed || trade.taker === self)) return invalid("No trade for that id.");
+      if (!trade || !(listed || trade.taker === self)) return invalid2("No trade for that id.");
       if (config.confirmTradeReport !== true) return ok(false);
       blocked.add(trade.from);
       return ok(true);
@@ -1326,7 +1428,10 @@
       shareAvailable: true,
       shareStatus: "opened",
       locale: null,
-      launchParams: {}
+      launchParams: {},
+      shopEnabled: true,
+      shopProducts: [],
+      shopPurchaseStatus: "redirecting"
     };
   }
   var memoryStore = null;
@@ -1363,7 +1468,7 @@
     }
     return { ...result, value: structuredClone(result.value) };
   }
-  function invalid2(message) {
+  function invalid3(message) {
     return failure(CODES.invalidParams, message);
   }
   function fallbackOf(value) {
@@ -1501,6 +1606,7 @@
       };
     }
     const net = createMockNet(config, localPeerWire);
+    const shop = createMockShop({ config });
     const leaderboards = createMockLeaderboards(() => {
       const { index: _index, ...identity } = localPeerWire(-1);
       return { ...identity, isGuest: !config.signedIn };
@@ -1554,7 +1660,7 @@
       manifestGeneration += 1;
       manifestRead = Promise.resolve();
       const parsed = parseLeaderboardManifest(manifest);
-      if (!parsed.ok) return invalid2(parsed.error);
+      if (!parsed.ok) return invalid3(parsed.error);
       return ok(leaderboards.load(parsed.leaderboards, false));
     }
     function requestProfile() {
@@ -1570,17 +1676,17 @@
     function setMine(params) {
       const { payload, baseRevision } = params;
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        return invalid2("Player state payload must be a JSON object.");
+        return invalid3("Player state payload must be a JSON object.");
       }
       const jsonError = gameJsonError(payload, "Player state payload");
-      if (jsonError) return invalid2(jsonError);
-      if (jsonBytes(payload) > PLAYER_STATE_MAX_BYTES) return invalid2("Player state is too large.");
+      if (jsonError) return invalid3(jsonError);
+      if (jsonBytes(payload) > PLAYER_STATE_MAX_BYTES) return invalid3("Player state is too large.");
       if (containsOpaqueString(payload)) {
-        return invalid2("Player state must not contain opaque encoded strings.");
+        return invalid3("Player state must not contain opaque encoded strings.");
       }
       const ratingGiven = "rating" in params && params.rating !== void 0;
       if (ratingGiven && params.rating !== null && !isRating(params.rating)) {
-        return invalid2("Invalid rating.");
+        return invalid3("Invalid rating.");
       }
       const current = myState ? myState.revision : 0;
       if (typeof baseRevision === "number" && baseRevision !== current) {
@@ -1597,7 +1703,7 @@
     }
     function getMany({ pseudoIds }) {
       if (!Array.isArray(pseudoIds) || pseudoIds.length === 0 || pseudoIds.length > 50) {
-        return invalid2("pseudoIds must be an array of at most 50 ids.");
+        return invalid3("pseudoIds must be an array of at most 50 ids.");
       }
       const states = pseudoIds.map((id) => otherStates.get(id)).filter((state) => state && !state.hidden).map(stateWire);
       return ok(states);
@@ -1606,17 +1712,17 @@
       let size = SAMPLE_DEFAULT_COUNT;
       if (count !== void 0 && count !== null) {
         if (!Number.isInteger(count) || count < 1 || count > SAMPLE_MAX_COUNT) {
-          return invalid2(`count must be an integer from 1 to ${SAMPLE_MAX_COUNT}.`);
+          return invalid3(`count must be an integer from 1 to ${SAMPLE_MAX_COUNT}.`);
         }
         size = count;
       }
       const minGiven = minRating !== void 0 && minRating !== null;
       const maxGiven = maxRating !== void 0 && maxRating !== null;
-      if (minGiven !== maxGiven) return invalid2("minRating and maxRating must be given together.");
+      if (minGiven !== maxGiven) return invalid3("minRating and maxRating must be given together.");
       if (minGiven && (!isRating(minRating) || !isRating(maxRating))) {
-        return invalid2("Invalid rating range.");
+        return invalid3("Invalid rating range.");
       }
-      if (minGiven && minRating > maxRating) return invalid2("minRating must not exceed maxRating.");
+      if (minGiven && minRating > maxRating) return invalid3("minRating must not exceed maxRating.");
       const self = localPseudoId();
       const candidates = [...otherStates.values()].filter(
         (state) => !state.hidden && state.pseudoId !== self && (!minGiven || state.rating !== null && state.rating >= minRating && state.rating <= maxRating)
@@ -1625,17 +1731,17 @@
     }
     function saveCloud({ payload, slot, baseRevision, fallback }) {
       const key = slot || "default";
-      if (!SLOT_PATTERN.test(key)) return invalid2("Invalid cloud save slot.");
+      if (!SLOT_PATTERN.test(key)) return invalid3("Invalid cloud save slot.");
       if (payload === void 0 || payload === null)
-        return invalid2("Cloud save payload is required.");
+        return invalid3("Cloud save payload is required.");
       if (config.signedIn) {
         const jsonError = gameJsonError(payload, "Cloud save payload");
-        if (jsonError) return invalid2(jsonError);
+        if (jsonError) return invalid3(jsonError);
       }
       if (jsonBytes(payload) > CLOUD_SAVE_MAX_BYTES)
-        return invalid2("Cloud save payload is too large.");
+        return invalid3("Cloud save payload is too large.");
       const mode = fallbackOf(fallback);
-      if (!mode.ok) return invalid2("Invalid cloud save fallback.");
+      if (!mode.ok) return invalid3("Invalid cloud save fallback.");
       if (!config.signedIn) {
         if (!mode.local) return failure(CODES.signInRequired, "Cloud save requires sign-in.");
         const now2 = (/* @__PURE__ */ new Date()).toISOString();
@@ -1670,9 +1776,9 @@
     }
     function loadCloud({ slot, fallback }) {
       const key = slot || "default";
-      if (!SLOT_PATTERN.test(key)) return invalid2("Invalid cloud save slot.");
+      if (!SLOT_PATTERN.test(key)) return invalid3("Invalid cloud save slot.");
       const mode = fallbackOf(fallback);
-      if (!mode.ok) return invalid2("Invalid cloud save fallback.");
+      if (!mode.ok) return invalid3("Invalid cloud save fallback.");
       if (!config.signedIn) {
         if (!mode.local) return failure(CODES.signInRequired, "Cloud save requires sign-in.");
         return ok(localSaves.get(key) ?? null);
@@ -1683,9 +1789,9 @@
     }
     function removeCloud({ slot, fallback }) {
       const key = slot || "default";
-      if (!SLOT_PATTERN.test(key)) return invalid2("Invalid cloud save slot.");
+      if (!SLOT_PATTERN.test(key)) return invalid3("Invalid cloud save slot.");
       const mode = fallbackOf(fallback);
-      if (!mode.ok) return invalid2("Invalid cloud save fallback.");
+      if (!mode.ok) return invalid3("Invalid cloud save fallback.");
       if (!config.signedIn && !mode.local) {
         return failure(CODES.signInRequired, "Cloud save requires sign-in.");
       }
@@ -1710,7 +1816,7 @@
       return true;
     }
     function fromBoard(outcome, pick) {
-      return outcome.error ? invalid2(outcome.error) : ok(pick(outcome));
+      return outcome.error ? invalid3(outcome.error) : ok(pick(outcome));
     }
     const handlers = {
       "player.getSelf": () => ok(playerWire()),
@@ -1730,7 +1836,7 @@
       "playerState.report": (p) => {
         if (!config.signedIn) return failure(CODES.signInRequired, "Reporting requires sign-in.");
         const target = otherStates.get(p.pseudoId);
-        if (!target || target.hidden) return invalid2("No player state for that id.");
+        if (!target || target.hidden) return invalid3("No player state for that id.");
         return ok(config.confirmPlayerStateReport === true);
       },
       "playerState.sample": sample,
@@ -1746,6 +1852,11 @@
       "trade.cancel": social.handlers.cancel,
       "trade.ack": social.handlers.ack,
       "trade.report": social.handlers.reportTrade,
+      "shop.products": shop.handlers.products,
+      "shop.purchase": shop.handlers.purchase,
+      "shop.pending": shop.handlers.pending,
+      "shop.ack": shop.handlers.ack,
+      "shop.owned": shop.handlers.owned,
       "cloudSave.load": loadCloud,
       "cloudSave.save": saveCloud,
       "cloudSave.remove": removeCloud,
@@ -1790,6 +1901,7 @@
         analyticsWarned.clear();
         myState = null;
         preview.reset();
+        shop.reset();
         net.reset();
         Object.assign(config, defaultMockConfig());
         writeStored({ consent: false });
@@ -1804,6 +1916,7 @@
       localeOnChange: () => () => {
       },
       playerStateOnPreview: (handler) => preview.onPreview(handler),
+      shopOnPending: (handler) => shop.onPending(handler),
       launchCurrent: () => mockLaunch(config),
       analyticsAvailable: () => true,
       logAnalytics,
@@ -1815,7 +1928,7 @@
         try {
           return snapshot(handler(params ?? {}));
         } catch (error) {
-          return invalid2(error instanceof Error ? error.message : "The mock rejected the call.");
+          return invalid3(error instanceof Error ? error.message : "The mock rejected the call.");
         }
       }
     };
@@ -1877,6 +1990,11 @@
     "trade.cancel": (apis, p) => apis.Trade?.cancel?.(p.tradeId),
     "trade.ack": (apis, p) => apis.Trade?.ack?.(p.ids),
     "trade.report": (apis, p) => apis.Trade?.report?.(p.tradeId),
+    "shop.products": (apis) => apis.Shop?.products?.(),
+    "shop.purchase": (apis, p) => apis.Shop?.purchase?.(p.sku),
+    "shop.pending": (apis) => apis.Shop?.pending?.(),
+    "shop.ack": (apis, p) => apis.Shop?.ack?.(p.ids),
+    "shop.owned": (apis) => apis.Shop?.owned?.(),
     "share.open": (apis, p) => apis.Share?.share(p),
     "share.getAvailability": (apis) => apis.Share?.isAvailable(),
     "locale.get": (apis) => apis.Locale?.get(),
@@ -1907,7 +2025,8 @@
       Locale: runtimeApi("Locale"),
       Launch: runtimeApi("Launch"),
       Inbox: runtimeApi("Inbox"),
-      Trade: runtimeApi("Trade")
+      Trade: runtimeApi("Trade"),
+      Shop: runtimeApi("Shop")
     };
   }
   async function callCloudSave(method, params) {
@@ -1936,6 +2055,11 @@
       // The runtime holds one handler and replaces it on the next call, so sdk.js registers only once.
       playerStateOnPreview(handler) {
         const unsubscribe = runtimeApi("PlayerState")?.onPreview?.(handler);
+        return typeof unsubscribe === "function" ? unsubscribe : () => {
+        };
+      },
+      shopOnPending(handler) {
+        const unsubscribe = runtimeApi("Shop")?.onPending?.(handler);
         return typeof unsubscribe === "function" ? unsubscribe : () => {
         };
       },
@@ -2157,6 +2281,35 @@
       )
     };
   }
+  function shopProductOf(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
+    return { sku: raw.sku, name: text(raw.name), priceJpy: number(raw.priceJpy) };
+  }
+  function shopProductsOf(raw) {
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.products)) return null;
+    const enabled = raw.enabled === true;
+    return {
+      enabled,
+      products: enabled ? raw.products.map(shopProductOf).filter((product) => product !== null) : []
+    };
+  }
+  function shopPurchaseOf(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.status !== "string" || !raw.status) return null;
+    return { status: raw.status };
+  }
+  function shopGrantOf(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id) return null;
+    if (typeof raw.sku !== "string" || !raw.sku) return null;
+    return { id: raw.id, sku: raw.sku, createdAt: text(raw.createdAt) };
+  }
+  function ownedShopGrantOf(raw) {
+    const grant = shopGrantOf(raw);
+    return grant ? { ...grant, acked: raw.acked === true } : null;
+  }
+  function shopPendingEventOf(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
+    return { sku: raw.sku };
+  }
 
   // src/room.js
   var DEFAULT_MAX_PEERS = 8;
@@ -2327,7 +2480,7 @@
   }
 
   // src/sdk.js
-  var VERSION = "0.15.0";
+  var VERSION = "0.16.0";
   var REQUIRED_PROTOCOL_VERSION = 1;
   var PLAYER_STATE_PROTOCOL_VERSION = 2;
   var SHARE_PROTOCOL_VERSION = 3;
@@ -2341,6 +2494,8 @@
   var SHARE_LAUNCH_PROTOCOL_VERSION = 9;
   var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
   var ROOM_CONFIG_PROTOCOL_VERSION = 11;
+  var SHOP_PROTOCOL_VERSION = 11;
+  var SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
   var ROOM_CONFIG_OPTIONS = ["maxPeers", "topology", "hostSelection"];
   var BACKENDS = /* @__PURE__ */ new Set(["auto", "web", "mock", "none"]);
   var LOCAL_HOSTNAMES = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -2444,6 +2599,12 @@
       copyOf: previewStateOf,
       rethrow: true
     });
+    const shopRelay = createRelay(backend, {
+      minProtocol: SHOP_PROTOCOL_VERSION,
+      subscribe: (target, dispatch) => target.shopOnPending?.(dispatch),
+      copyOf: shopPendingEventOf,
+      rethrow: false
+    });
     const playerState = {
       getMine: () => statesCall("playerState.getMine", void 0, orNull(playerStateOf)),
       setMine(payload, baseRevision, rawExtra) {
@@ -2527,6 +2688,25 @@
       cancel: (tradeId) => mapped("trade.cancel", { tradeId }, tradeIn, TRADE_PROTOCOL_VERSION),
       ack: (ids) => mapped("trade.ack", { ids }, (raw) => countOf(raw, "acked"), TRADE_PROTOCOL_VERSION),
       report: (tradeId) => mapped("trade.report", { tradeId }, (raw) => flagOf(raw, "reported"), TRADE_PROTOCOL_VERSION)
+    };
+    const shop = {
+      products: () => mapped("shop.products", void 0, required(shopProductsOf), SHOP_PROTOCOL_VERSION),
+      purchase(sku) {
+        const active = backend();
+        if (!active.isAvailable() || active.protocolVersion() < SHOP_PROTOCOL_VERSION) {
+          return Promise.resolve(unsupported());
+        }
+        if (typeof sku !== "string" || !SHOP_SKU_PATTERN.test(sku)) {
+          return Promise.resolve(
+            failure(CODES.invalidParams, "sku must be 1-64 lowercase letters, digits, or _ . - .")
+          );
+        }
+        return mapped("shop.purchase", { sku }, required(shopPurchaseOf), SHOP_PROTOCOL_VERSION);
+      },
+      pending: () => mapped("shop.pending", void 0, listIn("grants", shopGrantOf), SHOP_PROTOCOL_VERSION),
+      ack: (ids) => mapped("shop.ack", { ids }, (raw) => countOf(raw, "acked"), SHOP_PROTOCOL_VERSION),
+      owned: () => mapped("shop.owned", void 0, listIn("grants", ownedShopGrantOf), SHOP_PROTOCOL_VERSION),
+      onPending: (handler) => shopRelay.subscribe(handler)
     };
     function withFallback(params, extra) {
       if (extra?.fallback !== void 0 && backend().protocolVersion() >= CLOUD_SAVE_LOCAL_PROTOCOL_VERSION) {
@@ -2684,6 +2864,7 @@
         selection = settings.backend;
         localeRelay.bind();
         previewRelay.bind();
+        shopRelay.bind();
       },
       isAvailable() {
         const active = backend();
@@ -2695,6 +2876,7 @@
       playerState,
       inbox,
       trade,
+      shop,
       cloudSave,
       share,
       locale,

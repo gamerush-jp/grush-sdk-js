@@ -63,6 +63,11 @@ const INVOKERS = {
   "trade.cancel": (apis, p) => apis.Trade?.cancel?.(p.tradeId),
   "trade.ack": (apis, p) => apis.Trade?.ack?.(p.ids),
   "trade.report": (apis, p) => apis.Trade?.report?.(p.tradeId),
+  "shop.products": (apis) => apis.Shop?.products?.(),
+  "shop.purchase": (apis, p) => apis.Shop?.purchase?.(p.sku),
+  "shop.pending": (apis) => apis.Shop?.pending?.(),
+  "shop.ack": (apis, p) => apis.Shop?.ack?.(p.ids),
+  "shop.owned": (apis) => apis.Shop?.owned?.(),
   "share.open": (apis, p) => apis.Share?.share(p),
   "share.getAvailability": (apis) => apis.Share?.isAvailable(),
   "locale.get": (apis) => apis.Locale?.get(),
@@ -99,6 +104,7 @@ function currentApis() {
     Launch: runtimeApi("Launch"),
     Inbox: runtimeApi("Inbox"),
     Trade: runtimeApi("Trade"),
+    Shop: runtimeApi("Shop"),
   };
 }
 
@@ -128,6 +134,10 @@ export function createWebBackend() {
     // The runtime holds one handler and replaces it on the next call, so sdk.js registers only once.
     playerStateOnPreview(handler) {
       const unsubscribe = runtimeApi("PlayerState")?.onPreview?.(handler);
+      return typeof unsubscribe === "function" ? unsubscribe : () => {};
+    },
+    shopOnPending(handler) {
+      const unsubscribe = runtimeApi("Shop")?.onPending?.(handler);
       return typeof unsubscribe === "function" ? unsubscribe : () => {};
     },
     launchCurrent: () => runtimeApi("Launch")?.current?.() ?? null,

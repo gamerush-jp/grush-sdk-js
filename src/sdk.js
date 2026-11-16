@@ -12,9 +12,14 @@ import {
   leaderboardPageOf,
   localeOf,
   myTradesOf,
+  ownedShopGrantOf,
   playerOf,
   playerStateOf,
   shareResultOf,
+  shopGrantOf,
+  shopPendingEventOf,
+  shopProductsOf,
+  shopPurchaseOf,
   submitResultOf,
   tradeOf,
   tradePageOf,
@@ -23,7 +28,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.15.0";
+export const VERSION = "0.16.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -41,6 +46,11 @@ const PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 // maxPeers, topology and hostSelection on net.join, and room.maxPeers / room.topology. Older runtimes drop
 // the options and put the game in an 8-player mesh room, which the game could not tell apart.
 const ROOM_CONFIG_PROTOCOL_VERSION = 11;
+// The author's item shop. Every shop call answers unsupported below this version.
+const SHOP_PROTOCOL_VERSION = 11;
+// The sku rule GameRush applies when the author registers a product. A sku that cannot exist is rejected
+// here instead of reaching GameRush.
+const SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 const ROOM_CONFIG_OPTIONS = ["maxPeers", "topology", "hostSelection"];
 const BACKENDS = new Set(["auto", "web", "mock", "none"]);
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -168,6 +178,12 @@ export function createGRush(options = {}) {
     copyOf: previewStateOf,
     rethrow: true,
   });
+  const shopRelay = createRelay(backend, {
+    minProtocol: SHOP_PROTOCOL_VERSION,
+    subscribe: (target, dispatch) => target.shopOnPending?.(dispatch),
+    copyOf: shopPendingEventOf,
+    rethrow: false,
+  });
 
   const playerState = {
     getMine: () => statesCall("playerState.getMine", undefined, orNull(playerStateOf)),
@@ -266,6 +282,30 @@ export function createGRush(options = {}) {
       mapped("trade.ack", { ids }, (raw) => countOf(raw, "acked"), TRADE_PROTOCOL_VERSION),
     report: (tradeId) =>
       mapped("trade.report", { tradeId }, (raw) => flagOf(raw, "reported"), TRADE_PROTOCOL_VERSION),
+  };
+
+  const shop = {
+    products: () =>
+      mapped("shop.products", undefined, required(shopProductsOf), SHOP_PROTOCOL_VERSION),
+    purchase(sku) {
+      const active = backend();
+      if (!active.isAvailable() || active.protocolVersion() < SHOP_PROTOCOL_VERSION) {
+        return Promise.resolve(unsupported());
+      }
+      if (typeof sku !== "string" || !SHOP_SKU_PATTERN.test(sku)) {
+        return Promise.resolve(
+          failure(CODES.invalidParams, "sku must be 1-64 lowercase letters, digits, or _ . - ."),
+        );
+      }
+      return mapped("shop.purchase", { sku }, required(shopPurchaseOf), SHOP_PROTOCOL_VERSION);
+    },
+    pending: () =>
+      mapped("shop.pending", undefined, listIn("grants", shopGrantOf), SHOP_PROTOCOL_VERSION),
+    ack: (ids) =>
+      mapped("shop.ack", { ids }, (raw) => countOf(raw, "acked"), SHOP_PROTOCOL_VERSION),
+    owned: () =>
+      mapped("shop.owned", undefined, listIn("grants", ownedShopGrantOf), SHOP_PROTOCOL_VERSION),
+    onPending: (handler) => shopRelay.subscribe(handler),
   };
 
   // A GameRush older than protocol 5 does not know `fallback`. The option is dropped there instead of
@@ -452,6 +492,7 @@ export function createGRush(options = {}) {
       selection = settings.backend;
       localeRelay.bind();
       previewRelay.bind();
+      shopRelay.bind();
     },
     isAvailable() {
       const active = backend();
@@ -463,6 +504,7 @@ export function createGRush(options = {}) {
     playerState,
     inbox,
     trade,
+    shop,
     cloudSave,
     share,
     locale,

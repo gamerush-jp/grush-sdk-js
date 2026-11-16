@@ -152,7 +152,30 @@ async function useSdk(): Promise<void> {
     void status;
   }
 
+  const shopProducts = await GRush.shop.products();
+  const skus: string[] = shopProducts.ok ? shopProducts.value.products.map((p) => p.sku) : [];
+  const priceJpy: number = shopProducts.ok ? (shopProducts.value.products[0]?.priceJpy ?? 0) : 0;
+  void skus;
+  void priceJpy;
+  const bought = await GRush.shop.purchase("gem_pack.100");
+  if (bought.ok && bought.value.status === "redirecting") void 0;
+  const grants = await GRush.shop.pending();
+  if (grants.ok) await GRush.shop.ack(grants.value.map((grant) => grant.id));
+  const owned = await GRush.shop.owned();
+  const ackedAll: boolean = owned.ok && owned.value.every((grant) => grant.acked);
+  void ackedAll;
+  const stopShop: () => void = GRush.shop.onPending((event) => {
+    const sku: string = event.sku;
+    void sku;
+  });
+  stopShop();
+  // @ts-expect-error ack takes grant ids.
+  await GRush.shop.ack("g1");
+
   const local = createGRush({ backend: "mock" });
+  local.mock.config.shopProducts = [{ sku: "gem_pack", name: "Gems", priceJpy: 120 }];
+  local.mock.config.shopPurchaseStatus = "cancelled";
+  local.mock.config.shopEnabled = false;
   for (const event of local.mock.analyticsEvents()) {
     if (event.kind === "economy") {
       const balance: number = event.endingBalance;
