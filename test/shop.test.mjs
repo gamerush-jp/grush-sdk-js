@@ -119,7 +119,14 @@ test("a malformed sku is invalidParams and never reaches GameRush", async () => 
 test("a malformed ack list is invalidParams and never reaches GameRush", async () => {
   const { calls } = installRuntime(12, RESULTS);
   const sdk = createGRush();
-  for (const ids of [undefined, "g1", [], ["not-a-uuid"], [GRANT_ID, 3], Array(101).fill(GRANT_ID)]) {
+  for (const ids of [
+    undefined,
+    "g1",
+    [],
+    ["not-a-uuid"],
+    [GRANT_ID, 3],
+    Array(101).fill(GRANT_ID),
+  ]) {
     assert.equal((await sdk.shop.ack(ids)).code, "invalidParams", JSON.stringify(ids));
   }
   assert.equal((await sdk.shop.ack(Array(100).fill(GRANT_ID.toUpperCase()))).ok, true);

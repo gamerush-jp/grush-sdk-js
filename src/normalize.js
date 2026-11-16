@@ -241,9 +241,7 @@ export function shopProductsOf(raw) {
   // A shop that is not open sells nothing, so its list is empty even if the runtime sent one.
   return {
     enabled,
-    products: enabled
-      ? raw.products.map(shopProductOf).filter((product) => product !== null)
-      : [],
+    products: enabled ? raw.products.map(shopProductOf).filter((product) => product !== null) : [],
   };
 }
 
