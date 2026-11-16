@@ -242,7 +242,7 @@ const bought = await GRush.shop.purchase("gem_pack");
 ```
 
 - 作者が Studio か API キーで登録した商品（sku・商品名・税込みの価格）を、プレイヤーが買う。ゲームは `products()` で一覧を読む
-- **買えるのは Web の GameRush だけ。** アプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空。作者の販売が開いていないときも `enabled: false` の空。`pending`・`ack`・`owned` はどの面でも動く
+- **買えるのは Web の GameRush だけ。** アプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空。作者の販売が開いていないときも `enabled: false` の空。`pending`・`ack`・`owned` も今はアプリと LINE では `unsupported`（Web で買った分は Web で受け取る）
 - `purchase(sku)` の `status` は `redirecting`（ページがすぐ決済画面へ移る）・`cancelled`（プレイヤーがやめた）・`alreadyOwned`（もう持っている）。**ゲームは `purchase` を呼ぶ前にセーブしておく。** sku が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ GameRush へ送らずに `invalidParams`。ゲストは `signInRequired`
 - **付与は `ack` するまで `pending` に残る。** アイテムをセーブに反映して保存してから `ack(ids)` する。`ids` は 1〜100 件の付与 ID で、合わなければ GameRush へ送らずに `invalidParams`。`pending` は 1 回に最大 100 件（古い順）なので、`ack` したら、残りがあればもう一度読む。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む。反映済みの付与 ID をセーブに持てば、同じ付与を二度反映しない
 - `onPending(handler)` は、決済から戻って付与が届いたときに `{ sku }` で1回呼ばれる。登録より先に届いていた合図は、登録したときに1回だけ渡るので、起動したらすぐ登録する。返り値は解除関数。`handler` はそれぞれ別の複製を受け取り、`GRush.configure({ backend })` でバックエンドを切り替えても購読は続く
