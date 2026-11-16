@@ -10,8 +10,8 @@ import { CODES, failure, ok } from "./result.js";
 const MANIFEST_TIMEOUT_MS = 3000;
 // How many analytics events mock.analyticsEvents() keeps, newest last.
 export const MOCK_ANALYTICS_MAX_EVENTS = 200;
-// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 11).
-const MOCK_PROTOCOL_VERSION = 11;
+// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 12).
+const MOCK_PROTOCOL_VERSION = 12;
 
 const STORAGE_KEY = "grush-sdk-mock";
 const SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;

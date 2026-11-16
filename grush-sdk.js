@@ -1352,7 +1352,7 @@
   // src/backend-mock.js
   var MANIFEST_TIMEOUT_MS = 3e3;
   var MOCK_ANALYTICS_MAX_EVENTS = 200;
-  var MOCK_PROTOCOL_VERSION = 11;
+  var MOCK_PROTOCOL_VERSION = 12;
   var STORAGE_KEY = "grush-sdk-mock";
   var SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
   var PLAYER_STATE_MAX_BYTES = 4 * 1024;
@@ -2494,7 +2494,7 @@
   var SHARE_LAUNCH_PROTOCOL_VERSION = 9;
   var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
   var ROOM_CONFIG_PROTOCOL_VERSION = 11;
-  var SHOP_PROTOCOL_VERSION = 11;
+  var SHOP_PROTOCOL_VERSION = 12;
   var SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
   var ROOM_CONFIG_OPTIONS = ["maxPeers", "topology", "hostSelection"];
   var BACKENDS = /* @__PURE__ */ new Set(["auto", "web", "mock", "none"]);

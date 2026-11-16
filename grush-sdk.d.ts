@@ -731,7 +731,7 @@ export interface GRushSdk {
    * 2. 起動したときと `onPending` が呼ばれたときに `pending` を読む。
    * 3. 届いたアイテムをセーブに反映して保存してから `ack` する。`ack` するまで `pending` に残る。
    *
-   * `protocolVersion` 11 未満の GameRush と GameRush の外では、どれも `unsupported`。
+   * `protocolVersion` 12 未満の GameRush と GameRush の外では、どれも `unsupported`。
    */
   shop: {
     /** 商品の一覧。アプリと LINE では `enabled: false` の空。 */
@@ -750,7 +750,7 @@ export interface GRushSdk {
     /**
      * 決済から戻って付与が届いたときに `handler` を呼ぶ。返り値は解除関数。登録より先に届いていた合図は、
      * 登録したときに1回だけ渡るので、起動したらすぐ登録する。合図を受けたら `pending` を読む。
-     * `protocolVersion` 11 未満の GameRush と GameRush の外では呼ばれない。
+     * `protocolVersion` 12 未満の GameRush と GameRush の外では呼ばれない。
      * `configure({ backend })` でバックエンドを切り替えても購読は続く。
      */
     onPending(handler: (event: GRushShopPendingEvent) => void): () => void;

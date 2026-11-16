@@ -53,8 +53,8 @@ const RESULTS = {
   owned: { grants: [{ id: GRANT_ID, sku: "gem_pack", createdAt: "c", acked: true }] },
 };
 
-test("shop calls GRushShop from protocol 11 and reads its results", async () => {
-  const { calls } = installRuntime(11, RESULTS);
+test("shop calls GRushShop from protocol 12 and reads its results", async () => {
+  const { calls } = installRuntime(12, RESULTS);
   const sdk = createGRush();
 
   const products = await sdk.shop.products();
@@ -80,7 +80,7 @@ test("shop calls GRushShop from protocol 11 and reads its results", async () => 
 });
 
 test("shop reads bare results too", async () => {
-  installRuntime(11, {
+  installRuntime(12, {
     ...RESULTS,
     pending: [{ id: GRANT_ID, sku: "gem_pack", createdAt: "c" }],
     ack: 2,
@@ -93,20 +93,20 @@ test("shop reads bare results too", async () => {
 });
 
 test("a closed shop lists no products", async () => {
-  installRuntime(11, { products: { enabled: false, products: [{ sku: "a", name: "A" }] } });
+  installRuntime(12, { products: { enabled: false, products: [{ sku: "a", name: "A" }] } });
   const result = await createGRush().shop.products();
   assert.deepEqual(result.value, { enabled: false, products: [] });
 });
 
 test("an unreadable result is internal", async () => {
-  installRuntime(11, { products: null, purchase: {} });
+  installRuntime(12, { products: null, purchase: {} });
   const sdk = createGRush();
   assert.equal((await sdk.shop.products()).code, "internal");
   assert.equal((await sdk.shop.purchase("gem")).code, "internal");
 });
 
 test("a malformed sku is invalidParams and never reaches GameRush", async () => {
-  const { calls } = installRuntime(11, RESULTS);
+  const { calls } = installRuntime(12, RESULTS);
   const sdk = createGRush();
   for (const sku of ["", "Gem", "_gem", "gem|1", "a".repeat(65), 3, undefined]) {
     const result = await sdk.shop.purchase(sku);
@@ -116,8 +116,8 @@ test("a malformed sku is invalidParams and never reaches GameRush", async () => 
   assert.equal(calls.length, 1);
 });
 
-test("every shop call is unsupported below protocol 11", async () => {
-  const { calls, shop } = installRuntime(10, RESULTS);
+test("every shop call is unsupported below protocol 12", async () => {
+  const { calls, shop } = installRuntime(11, RESULTS);
   const sdk = createGRush();
   for (const result of [
     await sdk.shop.products(),
@@ -135,7 +135,7 @@ test("every shop call is unsupported below protocol 11", async () => {
 });
 
 test("errors from GRushShop keep their code", async () => {
-  installRuntime(11, RESULTS);
+  installRuntime(12, RESULTS);
   globalThis.GRushShop.purchase = () =>
     Promise.reject(Object.assign(new Error("not here"), { code: "unsupportedMethod" }));
   globalThis.GRushShop.pending = () =>
@@ -148,7 +148,7 @@ test("errors from GRushShop keep their code", async () => {
 });
 
 test("onPending registers once on GRushShop and hands each handler a copy", () => {
-  const { shop } = installRuntime(11, RESULTS);
+  const { shop } = installRuntime(12, RESULTS);
   const sdk = createGRush();
   const first = [];
   const second = [];

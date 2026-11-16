@@ -47,7 +47,7 @@ const PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 // the options and put the game in an 8-player mesh room, which the game could not tell apart.
 const ROOM_CONFIG_PROTOCOL_VERSION = 11;
 // The author's item shop. Every shop call answers unsupported below this version.
-const SHOP_PROTOCOL_VERSION = 11;
+const SHOP_PROTOCOL_VERSION = 12;
 // The sku rule GameRush applies when the author registers a product. A sku that cannot exist is rejected
 // here instead of reaching GameRush.
 const SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
