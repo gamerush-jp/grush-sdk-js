@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.16.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.17.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -74,7 +74,7 @@ TypeScript の型は `grush-sdk.d.ts`。
 | `GRush.locale.get()` | `{ locale, source, languages }`（下記） |
 | `GRush.locale.current()` | 同じ形、または `null`（同期。結果オブジェクトではない） |
 | `GRush.locale.onChange(handler)` | 解除関数（表示言語が決まったとき・変わったときに `handler` を呼ぶ） |
-| `GRush.launch.get()` | `{ params }`（起動パラメータ。下記） |
+| `GRush.launch.get()` | `{ params, invite }`（起動パラメータと招待の部屋。下記） |
 | `GRush.launch.current()` | 同じ形、または `null`（同期。結果オブジェクトではない） |
 | `GRush.analytics.logOnboardingStep(step, stepName, { fields })` | `true` / `false`（同期。下記） |
 | `GRush.analytics.logFunnelStep(funnel, funnelSessionId, step, stepName, { fields })` | `true` / `false`（同期） |
@@ -82,6 +82,7 @@ TypeScript の型は `grush-sdk.d.ts`。
 | `GRush.analytics.logEconomyEvent(flowType, currency, amount, endingBalance, transactionType, { itemSku, fields })` | `true` / `false`（同期） |
 | `GRush.analytics.isAvailable()` | `true` / `false`（同期） |
 | `GRush.net.join({ mode, roomCode, targetRoomSize, maxPeers, topology, hostSelection })` | 部屋（下記） |
+| `GRush.net.invite()` | `{ status: "sent" \| "cancelled", count }`（今いる部屋へフレンドを招く。下記） |
 
 失敗時の `code` は `unsupported` / `unavailable` / `timeout` / `rateLimited`（`retryAfterMs` 付き）/ `signInRequired` / `consentDeclined` / `invalidParams` / `conflict`（クラウドセーブの版ずれ）/ `previewRequired`（`onPreview` を購読せずに他プレイヤーの公開状態を読んだ）/ `internal`。
 
@@ -309,6 +310,7 @@ if (item && ownsItem(item)) openItem(item);
 - `get()` は GameRush から届くまで待つ。`current()` は届く前なら `null`
 - 古い GameRush（`protocolVersion` 8 未満）と GameRush の外では `get()` が `unsupported`、`current()` が `null`。GameRush のアプリ側が古くて答えられないときは、`unsupported` ではなく空の `params` が返る
 - モックは `GRush.mock.config.launchParams`（既定 `{}`）をそのまま返す。上の制限では確かめない
+- `invite` は、フレンドの招待（下の「フレンドを部屋へ招く」）から開いたときの部屋 `{ mode, roomCode }` で、ほかは `null`
 
 ### アナリティクス
 
@@ -378,6 +380,28 @@ if (joined.ok && joined.value.topology !== "hub") {
 - `maxPeers`・`topology`・`hostSelection` のどれかを渡すと、古い GameRush（`protocolVersion` 11 未満）では `unsupported`。`room.maxPeers` と `room.topology` は、`protocolVersion` 11 未満では 8 と `"mesh"`
 - 定員と形を知らない古い GameRush のアプリでは、定員と形が無視されて 8 人の `mesh` の部屋へ入る。このとき `targetRoomSize` に 9 以上を渡すと `invalidParams`。入った部屋は `room.maxPeers` と `room.topology` で確かめる
 
+#### フレンドを部屋へ招く
+
+```js
+// 部屋に入った後、「フレンドを招く」ボタンから
+const invited = await GRush.net.invite();
+if (invited.ok && invited.value.status === "sent") showToast(`${invited.value.count} 人を招待しました`);
+
+// 招待から開いたときは、起動の値に部屋が入っている
+const launched = await GRush.launch.get();
+if (launched.ok && launched.value.invite) {
+  const joined = await GRush.net.join(launched.value.invite);
+  if (!joined.ok) showMessage("部屋に入れませんでした"); // 招いた人が抜けた・満員・期限切れ
+}
+```
+
+- `invite()` は引数を取らない。GameRush が相互フォローの相手を選ぶシートを出し、今入っている部屋へ招く。ゲームは部屋も相手も選べず、受け取るのは送った人数（`count`）だけ
+- `status` は1人以上へ送ったら `"sent"`、送らずに閉じたら `"cancelled"`（`count` は 0）。選べるのは部屋の空いた席の数と 30 人の小さいほうまで
+- 部屋に居なければ `unavailable`、ゲストなら `signInRequired`。続けて呼ぶと `rateLimited`。シートを出せない面（埋め込みなど）と古い GameRush（`protocolVersion` 13 未満）と GameRush の外では `unsupported`
+- シートを出している間もゲームは止まらず、部屋の相手との対戦は続く。結果はシートを閉じたときに返る
+- 招かれた人が通知から開くと、そのスライドの `GRush.launch` の `invite` に `{ mode, roomCode }` が入る。そのまま `join` に渡すと招いた人の部屋へ入る。招いた人が部屋を出た・満員・招待の期限（15 分）が切れたときは `unavailable`
+- `invite` の部屋へ入るときに `maxPeers`・`topology` を渡す必要はない。部屋の定員と形で入る
+
 ## ローカルでの動作確認
 
 `localhost`・`127.0.0.1`・`[::1]`・`file://` では `GRush.backend` が `"mock"` になる（ESM 版は `file://` だとブラウザが読み込みを拒むので、ローカルサーバから開く）。GameRush 上では `"web"`、それ以外のサイトでは `"none"`。`GRush.configure({ backend: "mock" })` で強制もできる。
@@ -404,7 +428,7 @@ if (GRush.backend === "mock") {
 
 モックは実サーバと同じ縛り（宣言していない key への投稿・値域外・int の枠への小数・公開プレイヤー状態の 4KB と base64 らしい文字列・公開プレイヤー状態とクラウドへ保存するクラウドセーブの、3000 段を超える入れ子と対になっていないサロゲート・ランキングの metadata の同じ誤りと、対になっていないサロゲートを含む operationId・ゲストのクラウドセーブと通報・部屋コードの形式）で弾く。有効プレイ 10 秒未満の投稿と投稿頻度の上限は再現しない。`signedIn: false` のとき `fallback: "local"` 付きのクラウドセーブは、モックの中の端末の保存先に読み書きし（`reset()` で消える）、`signedIn` を `true` に戻すとクラウドへ書けるようになる。共有は確認シートを出さず、`shareStatus`（既定 `"opened"`）をそのまま返す。`launchParams` は GameRush と同じ制限で確かめ、合わなければ `invalidParams`。本文と画像の検査はしないので、弾かれる本文は GameRush 上で確かめる。
 
-アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 12。
+アナリティクスのモックは、GameRush と同じ検査をして、通ったイベントを1件ずつコンソールに出し、直近の 200 件を `GRush.mock.analyticsEvents()` で返す（`reset()` で空になる）。弾いたイベントは、GameRush と同じく理由ごとに1回だけコンソールに警告する（`reset()` でまた出る）。どこへも送らない。前面に出るまでの 30 件の溜め・本体の上限・同じステップを最初の1回だけ残す扱い・セッションあたりの上限は再現しないので、モックでは `true` の分がすべて記録に残る。モックが名乗る `protocolVersion` は 13。
 
 相手探し・受信箱・交換所のモックは、`GRush.mock.rivals` の 3 人の相手を持つ。相手はそれぞれ rating 付きの公開プレイヤー状態を持ち、届いたメッセージを同じ `kind` と `payload` で送り返す。はじめと `reset()` の後は、最初の相手からのメッセージ1通と、相手の受付中の出品を2件持つ。payload・offer・want・give の形、`operationId` での冪等、受付中の出品の上限、受諾の `outcome`、`pending` と `ack` は GameRush と同じ規則で動く。通報を承諾すると（`confirmInboxReport` / `confirmTradeReport`、既定 `true`）相手をブロックし、その相手のメッセージと出品は見えなくなる。
 
@@ -427,6 +451,13 @@ await GRush.shop.purchase("gem_pack"); // onPending が { sku: "gem_pack" } で�
 ```
 
 `GRush.mock.previewPlayerState(pseudoId, payload, { revision, rating })` は、`GRush.playerState.onPreview` の `handler` に確認用の表示の状態を渡す。渡すのは呼び出しの後（非同期）で、`handler` が無ければ次に登録したときに渡す。`revision` は省略すると 1、`rating` は省略すると `null`。形が合わなければ何もせず `false` を返す。
+
+フレンドの招待のモックはシートを出さず、相手も持たない。`invite()` は、部屋に居なければ `unavailable`、`signedIn: false` なら `signInRequired` を返し、ほかは `GRush.mock.config.inviteCount`（既定 1）人へ送ったことにして `sent` を返す。人数は部屋の空いた席の数と 30 の小さいほうまでに絞り、0 になれば `cancelled`。`config.inviteStatus = "cancelled"` で送らずに閉じたことにする。招待から開いたときは `config.launchInvite` に `{ mode, roomCode }` を入れると、`launch` の `invite` に載る（形が `join` の規則に合わなければ `null`）。
+
+```js
+GRush.mock.config.launchInvite = { mode: "duel", roomCode: "ABCD23" };
+const launched = await GRush.launch.get(); // launched.value.invite は { mode: "duel", roomCode: "ABCD23" }
+```
 
 **`unreliableDropRate` は既定 0 だが、出荷前に必ず 0 より大きくして試すこと。** パケットが落ちる前提で書けているかを確かめられる場所はここだけになる。
 

@@ -267,7 +267,7 @@ test("removing a stale peer handle does not evict the peer that reused its index
 
 test("mock rooms take the capacity and topology GameRush takes", async () => {
   sdk.mock.reset();
-  assert.equal(sdk.protocolVersion(), 12);
+  assert.equal(sdk.protocolVersion(), 13);
   const room = (await sdk.net.join()).value;
   assert.equal(room.maxPeers, 8);
   assert.equal(room.topology, "mesh");

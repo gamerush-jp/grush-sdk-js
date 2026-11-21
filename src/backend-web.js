@@ -76,6 +76,7 @@ const INVOKERS = {
     apis.Net?.join(p).then((room) =>
       room ? { source: roomSourceOf(room), info: describeRoom(room) } : null,
     ),
+  "net.invite": (apis) => apis.Net?.invite?.(),
 };
 
 // `fallback` is in the params only when the runtime is new enough to read it (see sdk.js).

@@ -69,6 +69,17 @@ async function useSdk(): Promise<void> {
   void item;
   void params;
   GRush.mock.config.launchParams = { item: "sword" };
+  const invited = launched.ok ? launched.value.invite : null;
+  if (invited) await GRush.net.join({ mode: invited.mode, roomCode: invited.roomCode });
+  GRush.mock.config.launchInvite = { mode: "duel", roomCode: "ABCD23" };
+  GRush.mock.config.inviteStatus = "cancelled";
+  GRush.mock.config.inviteCount = 2;
+  const sentInvite = await GRush.net.invite();
+  const inviteCount: number =
+    sentInvite.ok && sentInvite.value.status === "sent" ? sentInvite.value.count : 0;
+  void inviteCount;
+  // @ts-expect-error invite takes no room; GameRush invites to the room the player is in.
+  await GRush.net.invite({ roomCode: "ABCD23" });
 
   const loaded = await GRush.cloudSave.load("default", { fallback: "local" });
   if (loaded.ok && loaded.value) {

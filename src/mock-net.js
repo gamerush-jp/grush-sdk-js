@@ -55,6 +55,7 @@ export function createMockNet(config, localPeerWire) {
   const outgoingSeq = new Map();
   const local = createListeners();
   let localIndex = -1;
+  let roomMode = "";
   let roomCode = "";
   let hostIndex = -1;
   let peerSerial = 0;
@@ -234,6 +235,7 @@ export function createMockNet(config, localPeerWire) {
     const index = nextFreeIndex();
     if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
     roomCode = requested ? requested.toUpperCase() : roomCode || "MOCKROOM";
+    roomMode = mode;
     const peers = [...members.keys()].map(peerWire);
     localIndex = index;
     hostIndex = lowestIndex();
@@ -266,18 +268,26 @@ export function createMockNet(config, localPeerWire) {
     return true;
   }
 
+  // The room the game is in, with its free seats, or null outside a room. GameRush invites to this room.
+  function current() {
+    if (localIndex < 0) return null;
+    const seats = Math.max(0, capacity() - members.size - 1);
+    return { mode: roomMode, roomCode, seats };
+  }
+
   function reset() {
     for (const peer of members.values()) peer.listeners.clear();
     members.clear();
     outgoingSeq.clear();
     leave();
     roomCode = "";
+    roomMode = "";
     roomSerial = 1;
     hostIndex = -1;
     settings = null;
   }
 
-  return { join, addPeer, removePeer, raiseError, reset };
+  return { join, current, addPeer, removePeer, raiseError, reset };
 }
 
 function withDecoders(message) {

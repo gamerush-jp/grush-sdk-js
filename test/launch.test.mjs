@@ -45,13 +45,13 @@ test("launch.get and current read the runtime and copy the params", async () => 
   const result = await sdk.launch.get();
   assert.deepEqual(result, {
     ok: true,
-    value: { params: { item: "sword", dungeon: "3" } },
+    value: { params: { item: "sword", dungeon: "3" }, invite: null },
     code: "",
     message: "",
   });
   result.value.params.item = "shield";
   const current = sdk.launch.current();
-  assert.deepEqual(current, { params: { item: "sword", dungeon: "3" } });
+  assert.deepEqual(current, { params: { item: "sword", dungeon: "3" }, invite: null });
   current.params.extra = "x";
   assert.deepEqual(runtime.current().params, { item: "sword", dungeon: "3" });
 });
@@ -101,17 +101,59 @@ test("the GameRushLaunch alias is accepted too", async () => {
 test("the mock returns the configured params", async () => {
   globalThis.location = { protocol: "http:", hostname: "localhost" };
   assert.equal(sdk.backend, "mock");
-  assert.deepEqual((await sdk.launch.get()).value, { params: {} });
-  assert.deepEqual(sdk.launch.current(), { params: {} });
+  assert.deepEqual((await sdk.launch.get()).value, { params: {}, invite: null });
+  assert.deepEqual(sdk.launch.current(), { params: {}, invite: null });
 
   sdk.mock.config.launchParams = { item: "sword", count: 3 };
-  assert.deepEqual((await sdk.launch.get()).value, { params: { item: "sword" } });
+  assert.deepEqual((await sdk.launch.get()).value, { params: { item: "sword" }, invite: null });
   const current = sdk.launch.current();
   current.params.item = "shield";
   assert.equal(sdk.mock.config.launchParams.item, "sword");
 
   sdk.mock.reset();
   assert.deepEqual(sdk.mock.config.launchParams, {});
+});
+
+test("launch passes the invite room from the runtime", async () => {
+  const runtime = fakeLaunch({ params: {}, invite: { mode: "duel", roomCode: "ABCD23" } });
+  installRuntime(runtime, 13);
+  const result = await sdk.launch.get();
+  assert.deepEqual(result.value, { params: {}, invite: { mode: "duel", roomCode: "ABCD23" } });
+  result.value.invite.roomCode = "XXXX";
+  assert.deepEqual(sdk.launch.current().invite, { mode: "duel", roomCode: "ABCD23" });
+});
+
+test("launch reads an invite it cannot use as null", async () => {
+  for (const invite of [
+    null,
+    "duel:ABCD",
+    { mode: "duel" },
+    { mode: "", roomCode: "ABCD" },
+    { mode: 1, roomCode: "ABCD" },
+  ]) {
+    installRuntime(fakeLaunch({ params: { item: "sword" }, invite }), 13);
+    const result = await sdk.launch.get();
+    assert.deepEqual(result.value, { params: { item: "sword" }, invite: null });
+  }
+});
+
+test("an older runtime without invites reads as no invite", async () => {
+  installRuntime(fakeLaunch({ params: { item: "sword" } }), 12);
+  assert.equal((await sdk.launch.get()).value.invite, null);
+  assert.equal(sdk.launch.current().invite, null);
+});
+
+test("the mock returns the configured invite room", async () => {
+  globalThis.location = { protocol: "http:", hostname: "localhost" };
+  sdk.mock.config.launchInvite = { mode: "duel", roomCode: "ABCD23" };
+  assert.deepEqual((await sdk.launch.get()).value.invite, { mode: "duel", roomCode: "ABCD23" });
+  const joined = await sdk.net.join(sdk.launch.current().invite);
+  assert.equal(joined.value.roomCode, "ABCD23");
+
+  sdk.mock.config.launchInvite = { mode: "duel", roomCode: "ab" };
+  assert.equal(sdk.launch.current().invite, null);
+  sdk.mock.reset();
+  assert.equal(sdk.mock.config.launchInvite, null);
 });
 
 test("outside GameRush launch degrades to unsupported", async () => {

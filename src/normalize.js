@@ -226,7 +226,23 @@ export function launchOf(raw) {
     params: Object.fromEntries(
       Object.entries(params).filter(([, value]) => typeof value === "string"),
     ),
+    invite: launchInviteOf(raw.invite),
   };
+}
+
+// The room an invite opened the game for. GameRush has already checked the mode and the room code, so only
+// the shape is kept. Runtimes older than protocol 13 send none, which reads as null.
+function launchInviteOf(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const { mode, roomCode } = raw;
+  if (typeof mode !== "string" || !mode || typeof roomCode !== "string" || !roomCode) return null;
+  return { mode, roomCode };
+}
+
+export function inviteResultOf(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const sent = raw.status === "sent" && Number.isInteger(raw.count) && raw.count > 0;
+  return sent ? { status: "sent", count: raw.count } : { status: "cancelled", count: 0 };
 }
 
 // GameRush checks the sku, name and price when the author registers a product, so only the shape is kept.

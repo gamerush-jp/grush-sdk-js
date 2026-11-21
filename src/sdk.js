@@ -7,6 +7,7 @@ import {
   countOf,
   flagOf,
   inboxPageOf,
+  inviteResultOf,
   launchOf,
   leaderboardDefinitionOf,
   leaderboardPageOf,
@@ -28,7 +29,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.16.0";
+export const VERSION = "0.17.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -48,6 +49,8 @@ const PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 const ROOM_CONFIG_PROTOCOL_VERSION = 11;
 // The author's item shop. Every shop call answers unsupported below this version.
 const SHOP_PROTOCOL_VERSION = 12;
+// net.invite and the invite of launch. Older runtimes have no invite sheet and never pass an invite.
+const INVITE_PROTOCOL_VERSION = 13;
 // The sku rule GameRush applies when the author registers a product. A sku that cannot exist is rejected
 // here instead of reaching GameRush.
 const SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
@@ -489,6 +492,10 @@ export function createGRush(options = {}) {
     get room() {
       return currentRoom;
     },
+    // GameRush shows the invite sheet for the room the player is in. The game names neither the room nor
+    // the friends, and only learns how many were invited.
+    invite: () =>
+      mapped("net.invite", undefined, required(inviteResultOf), INVITE_PROTOCOL_VERSION),
   };
 
   return {

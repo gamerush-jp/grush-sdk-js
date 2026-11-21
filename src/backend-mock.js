@@ -10,8 +10,13 @@ import { CODES, failure, ok } from "./result.js";
 const MANIFEST_TIMEOUT_MS = 3000;
 // How many analytics events mock.analyticsEvents() keeps, newest last.
 export const MOCK_ANALYTICS_MAX_EVENTS = 200;
-// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 12).
-const MOCK_PROTOCOL_VERSION = 12;
+// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 12, invites need 13).
+const MOCK_PROTOCOL_VERSION = 13;
+// The most friends one invite sheet lets the player pick, as in GameRush.
+const INVITE_MAX_RECIPIENTS = 30;
+// The same rules GameRush applies to the mode and the room code of an invite.
+const INVITE_MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
+const INVITE_ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
 
 const STORAGE_KEY = "grush-sdk-mock";
 const SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -38,12 +43,23 @@ function containsOpaqueString(value) {
 // its limits, so check them in GameRush before relying on them.
 function mockLaunch(config) {
   const params = config.launchParams;
-  if (!params || typeof params !== "object") return { params: {} };
+  const invite = mockLaunchInvite(config.launchInvite);
+  if (!params || typeof params !== "object") return { params: {}, invite };
   return {
     params: Object.fromEntries(
       Object.entries(params).filter(([, value]) => typeof value === "string"),
     ),
+    invite,
   };
+}
+
+// Like GameRush, an invite whose mode or room code could not be joined is dropped, so the game sees none.
+function mockLaunchInvite(value) {
+  if (!value || typeof value !== "object") return null;
+  const { mode, roomCode } = value;
+  if (typeof mode !== "string" || !INVITE_MODE_PATTERN.test(mode)) return null;
+  if (typeof roomCode !== "string" || !INVITE_ROOM_CODE_PATTERN.test(roomCode)) return null;
+  return { mode, roomCode };
 }
 
 // The same limits GameRush applies to the launch parameters a game attaches to a share. Unlike the parameters a
@@ -105,6 +121,9 @@ export function defaultMockConfig() {
     shareStatus: "opened",
     locale: null,
     launchParams: {},
+    launchInvite: null,
+    inviteStatus: "sent",
+    inviteCount: 1,
     shopEnabled: true,
     shopProducts: [],
     shopPurchaseStatus: "redirecting",
@@ -404,6 +423,19 @@ export function createMockBackend(config) {
     return ok(playerWire());
   }
 
+  // Stands in for GameRush's invite sheet: the player picks config.inviteCount friends, at most as many as
+  // the room has free seats, and sends. Nothing is sent anywhere.
+  function invite() {
+    const room = net.current();
+    if (!room) return failure(CODES.unavailable, "Join a room before inviting.");
+    if (!config.signedIn) return failure(CODES.signInRequired, "Sign-in is required to invite.");
+    const wanted = Number.isInteger(config.inviteCount) ? config.inviteCount : 0;
+    const count = Math.min(wanted, room.seats, INVITE_MAX_RECIPIENTS);
+    if (config.inviteStatus === "cancelled" || count <= 0)
+      return ok({ status: "cancelled", count: 0 });
+    return ok({ status: "sent", count });
+  }
+
   function setMine(params) {
     const { payload, baseRevision } = params;
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -627,6 +659,7 @@ export function createMockBackend(config) {
     "locale.get": () => ok(mockLocale(config)),
     "launch.get": () => ok(mockLaunch(config)),
     "net.join": (p) => net.join(p),
+    "net.invite": invite,
   };
 
   const controls = {

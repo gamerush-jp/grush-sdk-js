@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.16.0
+/*! GameRush SDK for JavaScript v0.17.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -643,6 +643,7 @@ function createMockNet(config, localPeerWire) {
   const outgoingSeq = /* @__PURE__ */ new Map();
   const local = createListeners();
   let localIndex = -1;
+  let roomMode = "";
   let roomCode = "";
   let hostIndex = -1;
   let peerSerial = 0;
@@ -791,6 +792,7 @@ function createMockNet(config, localPeerWire) {
     const index = nextFreeIndex();
     if (index < 0) return failure(CODES.unavailable, "The mock room is full.");
     roomCode = requested ? requested.toUpperCase() : roomCode || "MOCKROOM";
+    roomMode = mode;
     const peers = [...members.keys()].map(peerWire);
     localIndex = index;
     hostIndex = lowestIndex();
@@ -821,17 +823,23 @@ function createMockNet(config, localPeerWire) {
     announceToLocal("error", { code: String(code), message: String(message) });
     return true;
   }
+  function current() {
+    if (localIndex < 0) return null;
+    const seats = Math.max(0, capacity() - members.size - 1);
+    return { mode: roomMode, roomCode, seats };
+  }
   function reset() {
     for (const peer of members.values()) peer.listeners.clear();
     members.clear();
     outgoingSeq.clear();
     leave();
     roomCode = "";
+    roomMode = "";
     roomSerial = 1;
     hostIndex = -1;
     settings = null;
   }
-  return { join, addPeer, removePeer, raiseError, reset };
+  return { join, current, addPeer, removePeer, raiseError, reset };
 }
 function withDecoders(message) {
   return {
@@ -1354,7 +1362,10 @@ function createMockSocial({ config, selfId, isKnownPlayer, now = () => Date.now(
 // src/backend-mock.js
 var MANIFEST_TIMEOUT_MS = 3e3;
 var MOCK_ANALYTICS_MAX_EVENTS = 200;
-var MOCK_PROTOCOL_VERSION = 12;
+var MOCK_PROTOCOL_VERSION = 13;
+var INVITE_MAX_RECIPIENTS = 30;
+var INVITE_MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
+var INVITE_ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
 var STORAGE_KEY = "grush-sdk-mock";
 var SLOT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 var PLAYER_STATE_MAX_BYTES = 4 * 1024;
@@ -1376,12 +1387,21 @@ function containsOpaqueString(value) {
 }
 function mockLaunch(config) {
   const params = config.launchParams;
-  if (!params || typeof params !== "object") return { params: {} };
+  const invite = mockLaunchInvite(config.launchInvite);
+  if (!params || typeof params !== "object") return { params: {}, invite };
   return {
     params: Object.fromEntries(
       Object.entries(params).filter(([, value]) => typeof value === "string")
-    )
+    ),
+    invite
   };
+}
+function mockLaunchInvite(value) {
+  if (!value || typeof value !== "object") return null;
+  const { mode, roomCode } = value;
+  if (typeof mode !== "string" || !INVITE_MODE_PATTERN.test(mode)) return null;
+  if (typeof roomCode !== "string" || !INVITE_ROOM_CODE_PATTERN.test(roomCode)) return null;
+  return { mode, roomCode };
 }
 var SHARE_LAUNCH_KEY = /^[A-Za-z0-9_-]{1,32}$/;
 var SHARE_LAUNCH_VALUE = /^[A-Za-z0-9._~:,-]{0,128}$/;
@@ -1431,6 +1451,9 @@ function defaultMockConfig() {
     shareStatus: "opened",
     locale: null,
     launchParams: {},
+    launchInvite: null,
+    inviteStatus: "sent",
+    inviteCount: 1,
     shopEnabled: true,
     shopProducts: [],
     shopPurchaseStatus: "redirecting"
@@ -1675,6 +1698,16 @@ function createMockBackend(config) {
     writeStored({ consent: true });
     return ok(playerWire());
   }
+  function invite() {
+    const room = net.current();
+    if (!room) return failure(CODES.unavailable, "Join a room before inviting.");
+    if (!config.signedIn) return failure(CODES.signInRequired, "Sign-in is required to invite.");
+    const wanted = Number.isInteger(config.inviteCount) ? config.inviteCount : 0;
+    const count = Math.min(wanted, room.seats, INVITE_MAX_RECIPIENTS);
+    if (config.inviteStatus === "cancelled" || count <= 0)
+      return ok({ status: "cancelled", count: 0 });
+    return ok({ status: "sent", count });
+  }
   function setMine(params) {
     const { payload, baseRevision } = params;
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -1872,7 +1905,8 @@ function createMockBackend(config) {
     "share.getAvailability": () => ok(config.shareAvailable === true),
     "locale.get": () => ok(mockLocale(config)),
     "launch.get": () => ok(mockLaunch(config)),
-    "net.join": (p) => net.join(p)
+    "net.join": (p) => net.join(p),
+    "net.invite": invite
   };
   const controls = {
     config,
@@ -2003,7 +2037,8 @@ var INVOKERS = {
   "launch.get": (apis) => apis.Launch?.get(),
   "net.join": (apis, p) => apis.Net?.join(p).then(
     (room) => room ? { source: roomSourceOf(room), info: describeRoom(room) } : null
-  )
+  ),
+  "net.invite": (apis) => apis.Net?.invite?.()
 };
 function fallbackOptions(p) {
   return "fallback" in p ? { fallback: p.fallback } : {};
@@ -2280,8 +2315,20 @@ function launchOf(raw) {
   return {
     params: Object.fromEntries(
       Object.entries(params).filter(([, value]) => typeof value === "string")
-    )
+    ),
+    invite: launchInviteOf(raw.invite)
   };
+}
+function launchInviteOf(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const { mode, roomCode } = raw;
+  if (typeof mode !== "string" || !mode || typeof roomCode !== "string" || !roomCode) return null;
+  return { mode, roomCode };
+}
+function inviteResultOf(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const sent = raw.status === "sent" && Number.isInteger(raw.count) && raw.count > 0;
+  return sent ? { status: "sent", count: raw.count } : { status: "cancelled", count: 0 };
 }
 function shopProductOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
@@ -2482,7 +2529,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.16.0";
+var VERSION = "0.17.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
@@ -2497,6 +2544,7 @@ var SHARE_LAUNCH_PROTOCOL_VERSION = 9;
 var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 var ROOM_CONFIG_PROTOCOL_VERSION = 11;
 var SHOP_PROTOCOL_VERSION = 12;
+var INVITE_PROTOCOL_VERSION = 13;
 var SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 var SHOP_ACK_MAX_IDS = 100;
 var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2857,7 +2905,10 @@ function createGRush(options = {}) {
     },
     get room() {
       return currentRoom;
-    }
+    },
+    // GameRush shows the invite sheet for the room the player is in. The game names neither the room nor
+    // the friends, and only learns how many were invited.
+    invite: () => mapped("net.invite", void 0, required(inviteResultOf), INVITE_PROTOCOL_VERSION)
   };
   return {
     VERSION,

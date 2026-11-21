@@ -178,7 +178,7 @@ test("onPreview moves between the mock and the runtime when configure switches t
 test("the mock hands a preview to the handler once, after the call returns", async () => {
   globalThis.location = { protocol: "http:", hostname: "localhost" };
   assert.equal(sdk.backend, "mock");
-  assert.equal(sdk.protocolVersion(), 12);
+  assert.equal(sdk.protocolVersion(), 13);
   const seen = [];
   sdk.playerState.onPreview((state) => seen.push(state));
 

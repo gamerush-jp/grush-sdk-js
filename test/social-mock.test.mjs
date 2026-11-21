@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 test("the mock speaks protocol 12", () => {
-  assert.equal(sdk.protocolVersion(), 12);
+  assert.equal(sdk.protocolVersion(), 13);
 });
 
 test("matchmaking samples rivals, filters by rating and never returns yourself", async () => {

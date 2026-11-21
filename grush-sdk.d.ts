@@ -363,7 +363,22 @@ export type GRushLocale = {
  */
 export type GRushLaunch = {
   params: Record<string, string>;
+  /**
+   * 招待から開いたときの、招いた人の部屋。この値で `net.join({ mode, roomCode })` を呼ぶと、その部屋へ入る。
+   * 招待の通知から開いたスライドだけが持ち、ほかは `null`。`protocolVersion` 13 未満の GameRush でも `null`。
+   */
+  invite: GRushLaunchInvite | null;
 };
+
+/** 招待から開いたときの部屋。`net.join` へそのまま渡せる。 */
+export type GRushLaunchInvite = { mode: string; roomCode: string };
+
+/**
+ * `net.invite` の結果。`"sent"` は1人以上へ招待を送った、`"cancelled"` は送らずに閉じた。`count` は送った人数で、
+ * `"cancelled"` では 0。誰へ送ったかはゲームへ渡らない。
+ */
+export type GRushInviteStatus = "sent" | "cancelled";
+export type GRushInviteResult = { status: GRushInviteStatus; count: number };
 
 /**
  * 分析イベントの custom field。3つまで。キーは英数字と `_` で 32 文字まで。値は1行のテキストで
@@ -521,6 +536,18 @@ export type GRushMockConfig = {
   locale: string | null;
   /** `launch` が返す起動パラメータ。モックは GameRush の制限で確かめずにそのまま返す。 */
   launchParams: Record<string, string>;
+  /**
+   * `launch` が返す招待の部屋。招待から開いたときを試すのに使う。`mode` と `roomCode` の形が `join` の規則に
+   * 合わなければ `null` として返す。既定 `null`。
+   */
+  launchInvite: GRushLaunchInvite | null;
+  /** `net.invite` の答え。`"cancelled"` にすると送らずに閉じたことにする。既定 `"sent"`。 */
+  inviteStatus: GRushInviteStatus;
+  /**
+   * `net.invite` で送ったことにする人数。部屋の空いた席の数と 30 の小さいほうまでに絞り、0 になれば
+   * `"cancelled"` を返す。既定 1。
+   */
+  inviteCount: number;
   /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unsupported` で失敗する（アプリと LINE と同じ）。既定 `true`。 */
   shopEnabled: boolean;
   /** `shop.products` が返す商品。sku・名前・整数の価格がそろわないものは外す。既定は空。 */
@@ -873,6 +900,14 @@ export interface GRushSdk {
      */
     join(options?: GRushJoinOptions): Promise<GRushResult<GRushRoom>>;
     readonly room: GRushRoom | null;
+    /**
+     * 今いる部屋へ、相互フォローの相手を招く。GameRush が相手を選ぶシートを出し、プレイヤーが送るか閉じると解決する。
+     * 招く部屋は今入っている部屋で、ゲームは部屋も相手も選べず、送った人数だけを受け取る。招かれた人が通知から開くと、
+     * `launch` の `invite` にこの部屋が入る。部屋に居なければ `unavailable`、ゲストなら `signInRequired`、
+     * シートを出せない面（埋め込みなど）と `protocolVersion` 13 未満の GameRush と GameRush の外では `unsupported`。
+     * 続けて呼ぶと `rateLimited`。シートを出している間もゲームは止まらない。
+     */
+    invite(): Promise<GRushResult<GRushInviteResult>>;
   };
   mock: GRushMock;
 }
