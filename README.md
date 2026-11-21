@@ -397,10 +397,12 @@ if (launched.ok && launched.value.invite) {
 
 - `invite()` は引数を取らない。GameRush が相互フォローの相手を選ぶシートを出し、今入っている部屋へ招く。ゲームは部屋も相手も選べず、受け取るのは送った人数（`count`）だけ
 - `status` は1人以上へ送ったら `"sent"`、送らずに閉じたら `"cancelled"`（`count` は 0）。選べるのは部屋の空いた席の数と 30 人の小さいほうまで
-- 部屋に居なければ `unavailable`、ゲストなら `signInRequired`。続けて呼ぶと `rateLimited`。シートを出せない面（埋め込みなど）と古い GameRush（`protocolVersion` 13 未満）と GameRush の外では `unsupported`
+- 部屋に居なければ `unavailable`、ゲストなら `signInRequired`。5 秒に 1 回より多く呼ぶと `rateLimited`。シートを出せない面（埋め込みなど）と古い GameRush（`protocolVersion` 13 未満）と GameRush の外では `unsupported`
+- GameRush が招待を送れなかったとき（GameRush のサーバの招待の上限・空いた席の不足・部屋を出たなど）は、シートの中に理由が出る。ゲームへエラーは返らず、閉じると `"cancelled"`
 - シートを出している間もゲームは止まらず、部屋の相手との対戦は続く。結果はシートを閉じたときに返る
-- 招かれた人が通知から開くと、そのスライドの `GRush.launch` の `invite` に `{ mode, roomCode }` が入る。そのまま `join` に渡すと招いた人の部屋へ入る。招いた人が部屋を出た・満員・招待の期限（15 分）が切れたときは `unavailable`
-- `invite` の部屋へ入るときに `maxPeers`・`topology` を渡す必要はない。部屋の定員と形で入る
+- 招かれた人が通知から開くと、そのスライドの `GRush.launch` の `invite` に `{ mode, roomCode }` が入る。そのまま `join` に渡すと招いた人の部屋へ入る。招待の `mode` と `roomCode` の `join` は招待の部屋にだけ入り、招いた人が部屋を出た・満員・招待の期限（15 分）が切れたときは、新しい部屋を作らずに `unavailable`
+- 招待の部屋への `join` は `maxPeers`・`topology` を見ず、部屋の定員と形で入る
+- 別のゲームへスワイプしてから戻った後の `join` は招待の `join` にならず、`roomCode` を渡した普通の `join` になる
 
 ## ローカルでの動作確認
 

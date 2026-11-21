@@ -905,7 +905,8 @@ export interface GRushSdk {
      * 招く部屋は今入っている部屋で、ゲームは部屋も相手も選べず、送った人数だけを受け取る。招かれた人が通知から開くと、
      * `launch` の `invite` にこの部屋が入る。部屋に居なければ `unavailable`、ゲストなら `signInRequired`、
      * シートを出せない面（埋め込みなど）と `protocolVersion` 13 未満の GameRush と GameRush の外では `unsupported`。
-     * 続けて呼ぶと `rateLimited`。シートを出している間もゲームは止まらない。
+     * 5 秒に 1 回より多く呼ぶと `rateLimited`。GameRush が送れなかったとき（招待の上限・空いた席の不足など）は
+     * シートの中に理由が出て、閉じると `cancelled` で解決する。シートを出している間もゲームは止まらない。
      */
     invite(): Promise<GRushResult<GRushInviteResult>>;
   };
