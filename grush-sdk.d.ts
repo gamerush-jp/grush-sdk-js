@@ -541,7 +541,7 @@ export type GRushMockConfig = {
    * 合わなければ `null` として返す。既定 `null`。
    */
   launchInvite: GRushLaunchInvite | null;
-  /** `net.invite` の答え。`"cancelled"` にすると送らずに閉じたことにする。既定 `"sent"`。 */
+  /** `net.invite` の答え。`"cancelled"` のときだけ送らずに閉じたことにし、ほかの値では送ったことにする。既定 `"sent"`。 */
   inviteStatus: GRushInviteStatus;
   /**
    * `net.invite` で送ったことにする人数。部屋の空いた席の数と 30 の小さいほうまでに絞り、0 になれば
@@ -906,7 +906,9 @@ export interface GRushSdk {
      * `launch` の `invite` にこの部屋が入る。部屋に居なければ `unavailable`、ゲストなら `signInRequired`、
      * シートを出せない面（埋め込みなど）と `protocolVersion` 13 未満の GameRush と GameRush の外では `unsupported`。
      * 5 秒に 1 回より多く呼ぶと `rateLimited`。GameRush が送れなかったとき（招待の上限・空いた席の不足など）は
-     * シートの中に理由が出て、閉じると `cancelled` で解決する。シートを出している間もゲームは止まらない。
+     * シートの中に理由が出て、閉じると `cancelled` で解決する。ゲームのスライドが前面にないとき・プレイヤーが別の画面
+     * （閲覧など）を見ているとき、送らずに閉じたスライドで閉じてから 60 秒の間は、シートを出さずにすぐ `cancelled` で
+     * 解決する。シートを出している間もゲームは止まらない。
      */
     invite(): Promise<GRushResult<GRushInviteResult>>;
   };

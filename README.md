@@ -400,9 +400,10 @@ if (launched.ok && launched.value.invite) {
 - 部屋に居なければ `unavailable`、ゲストなら `signInRequired`。5 秒に 1 回より多く呼ぶと `rateLimited`。シートを出せない面（埋め込みなど）と古い GameRush（`protocolVersion` 13 未満）と GameRush の外では `unsupported`
 - GameRush が招待を送れなかったとき（GameRush のサーバの招待の上限・空いた席の不足・部屋を出たなど）は、シートの中に理由が出る。ゲームへエラーは返らず、閉じると `"cancelled"`
 - シートを出している間もゲームは止まらず、部屋の相手との対戦は続く。結果はシートを閉じたときに返る
+- シートを出せないときは、出さずにすぐ `"cancelled"` が返る。ゲームのスライドが前面にないとき・プレイヤーが別の画面（閲覧など）を見ているとき、送らずに閉じたスライドで閉じてから 60 秒の間がそう
 - 招かれた人が通知から開くと、そのスライドの `GRush.launch` の `invite` に `{ mode, roomCode }` が入る。そのまま `join` に渡すと招いた人の部屋へ入る。招待の `mode` と `roomCode` の `join` は招待の部屋にだけ入り、招いた人が部屋を出た・満員・招待の期限（15 分）が切れたときは、新しい部屋を作らずに `unavailable`
 - 招待の部屋への `join` は `maxPeers`・`topology` を見ず、部屋の定員と形で入る
-- 別のゲームへスワイプしてから戻った後の `join` は招待の `join` にならず、`roomCode` を渡した普通の `join` になる
+- 招待で一度部屋に入った後の `join`（部屋の寿命や切断の後の入り直し）は招待の `join` にならず、部屋コードを渡した普通の `join` になる。別のゲームへスワイプしてから戻った後の `join` も同じ
 
 ## ローカルでの動作確認
 
@@ -454,7 +455,7 @@ await GRush.shop.purchase("gem_pack"); // onPending が { sku: "gem_pack" } で�
 
 `GRush.mock.previewPlayerState(pseudoId, payload, { revision, rating })` は、`GRush.playerState.onPreview` の `handler` に確認用の表示の状態を渡す。渡すのは呼び出しの後（非同期）で、`handler` が無ければ次に登録したときに渡す。`revision` は省略すると 1、`rating` は省略すると `null`。形が合わなければ何もせず `false` を返す。
 
-フレンドの招待のモックはシートを出さず、相手も持たない。`invite()` は、部屋に居なければ `unavailable`、`signedIn: false` なら `signInRequired` を返し、ほかは `GRush.mock.config.inviteCount`（既定 1）人へ送ったことにして `sent` を返す。人数は部屋の空いた席の数と 30 の小さいほうまでに絞り、0 になれば `cancelled`。`config.inviteStatus = "cancelled"` で送らずに閉じたことにする。招待から開いたときは `config.launchInvite` に `{ mode, roomCode }` を入れると、`launch` の `invite` に載る（形が `join` の規則に合わなければ `null`）。
+フレンドの招待のモックはシートを出さず、相手も持たない。`invite()` は、部屋に居なければ `unavailable`、`signedIn: false` なら `signInRequired` を返し、ほかは `GRush.mock.config.inviteCount`（既定 1）人へ送ったことにして `sent` を返す。人数は部屋の空いた席の数と 30 の小さいほうまでに絞り、0 になれば `cancelled`。`config.inviteStatus = "cancelled"` で送らずに閉じたことにする。招待から開いたときは `config.launchInvite` に `{ mode, roomCode }` を入れると、`launch` の `invite` に載る（形が `join` の規則に合わなければ `null`）。モックは招待の `join` を再現しない。`launchInvite` の部屋へ `join` すると、GameRush と違い、招いた人の居ない新しい部屋になる。
 
 ```js
 GRush.mock.config.launchInvite = { mode: "duel", roomCode: "ABCD23" };

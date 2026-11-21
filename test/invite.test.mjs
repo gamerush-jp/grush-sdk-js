@@ -123,6 +123,9 @@ test("the mock invites to the room the game is in", async () => {
 
   sdk.mock.config.inviteStatus = "cancelled";
   assert.deepEqual((await sdk.net.invite()).value, { status: "cancelled", count: 0 });
+  // "cancelled" のほかは、知らない値でも送ったことにする（Godot のモックと同じ）。
+  sdk.mock.config.inviteStatus = "mystery";
+  assert.deepEqual((await sdk.net.invite()).value, { status: "sent", count: 30 });
 
   sdk.mock.config.inviteStatus = "sent";
   sdk.mock.config.signedIn = false;

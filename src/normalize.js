@@ -239,6 +239,8 @@ function launchInviteOf(raw) {
   return { mode, roomCode };
 }
 
+// Sent only when the status is "sent" and the count is a positive integer; any other object reads as cancelled,
+// as in the Unity and Godot SDKs. A non-object answer is unreadable (internal).
 export function inviteResultOf(raw) {
   if (!raw || typeof raw !== "object") return null;
   const sent = raw.status === "sent" && Number.isInteger(raw.count) && raw.count > 0;
