@@ -195,6 +195,9 @@ export function cloudSaveOf(raw) {
     createdAt: text(raw.createdAt),
     updatedAt: text(raw.updatedAt),
     storage: raw.storage === "local" ? "local" : "cloud",
+    // Only a cloud save that GameRush has written is synced. Older GameRush versions omit the
+    // field and only answer after the write, so a missing value means synced.
+    synced: raw.storage !== "local" && raw.synced !== false,
   };
 }
 

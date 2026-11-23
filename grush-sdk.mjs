@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.18.0
+/*! GameRush SDK for JavaScript v0.19.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -2304,7 +2304,10 @@ function cloudSaveOf(raw) {
     revision: number(raw.revision),
     createdAt: text(raw.createdAt),
     updatedAt: text(raw.updatedAt),
-    storage: raw.storage === "local" ? "local" : "cloud"
+    storage: raw.storage === "local" ? "local" : "cloud",
+    // Only a cloud save that GameRush has written is synced. Older GameRush versions omit the
+    // field and only answer after the write, so a missing value means synced.
+    synced: raw.storage !== "local" && raw.synced !== false
   };
 }
 function shareResultOf(raw) {
@@ -2547,7 +2550,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.18.0";
+var VERSION = "0.19.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;

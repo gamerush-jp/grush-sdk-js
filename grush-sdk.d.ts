@@ -321,11 +321,20 @@ export type GRushCloudSaveStorage = "cloud" | "local";
 export type GRushCloudSave = {
   slot: string;
   payload: JsonValue;
-  /** クラウドの版。1 から増える。端末のセーブは常に 0。 */
+  /**
+   * クラウドの版。1 から増える。端末のセーブは常に 0。`synced` が `false` の保存では、
+   * クラウドに書けたときに付くと見込んだ版で、次の `save` の `baseRevision` にそのまま渡せる。
+   */
   revision: number;
   createdAt: string;
   updatedAt: string;
   storage: GRushCloudSaveStorage;
+  /**
+   * クラウドに書けているか。サインインしているときの `save` は、GameRush が端末に控えた時点で
+   * `false` のまま返り、クラウドへは後からまとめて送られる。届く前でも、同じ端末の `load` は
+   * 最後に保存した中身を返す。端末のセーブ（`storage: "local"`）は常に `false`。
+   */
+  synced: boolean;
 };
 
 /**
