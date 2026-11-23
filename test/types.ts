@@ -4,6 +4,7 @@ import GRush, {
   type GRushMessage,
   type GRushRoom,
   type GRushRoomTopology,
+  type GRushShopItemType,
   type JsonValue,
 } from "../grush-sdk";
 
@@ -168,8 +169,14 @@ async function useSdk(): Promise<void> {
   const priceJpy: number = shopProducts.ok ? (shopProducts.value.products[0]?.priceJpy ?? 0) : 0;
   void skus;
   void priceJpy;
+  const itemType: GRushShopItemType | undefined = shopProducts.ok
+    ? shopProducts.value.products[0]?.type
+    : undefined;
+  if (itemType === "consumable" || itemType === "permanent") void itemType;
   const bought = await GRush.shop.purchase("gem_pack.100");
   if (bought.ok && bought.value.status === "redirecting") void 0;
+  if (bought.ok && (bought.value.status === "purchased" || bought.value.status === "pending"))
+    void 0;
   const grants = await GRush.shop.pending();
   if (grants.ok) await GRush.shop.ack(grants.value.map((grant) => grant.id));
   const owned = await GRush.shop.owned();
@@ -184,8 +191,12 @@ async function useSdk(): Promise<void> {
   await GRush.shop.ack("g1");
 
   const local = createGRush({ backend: "mock" });
-  local.mock.config.shopProducts = [{ sku: "gem_pack", name: "Gems", priceJpy: 120 }];
+  local.mock.config.shopProducts = [
+    { sku: "gem_pack", name: "Gems", priceJpy: 120 },
+    { sku: "potion.heal", name: "Potion", priceJpy: 120, type: "consumable" },
+  ];
   local.mock.config.shopPurchaseStatus = "cancelled";
+  local.mock.config.shopPurchaseStatus = "purchased";
   local.mock.config.shopEnabled = false;
   for (const event of local.mock.analyticsEvents()) {
     if (event.kind === "economy") {

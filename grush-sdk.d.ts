@@ -249,6 +249,14 @@ export type GRushTradePage = {
   nextCursor: string | null;
 };
 
+/**
+ * 商品の種類。`permanent`: 買い切り。同じプレイヤーは、返金されない限り 1 回だけ買え、`owned` に入る。
+ * `consumable`: 消費。同じプレイヤーが何度でも買え、`owned` には入らない。
+ * 消費のアイテムを、ゲーム内通貨（ほかのアイテムや機能と交換する対価）と抽選（偶然で中身が決まる仕組み）に使ってはならない。
+ * 知らない値が増えても読めるよう、文字列のまま渡す。
+ */
+export type GRushShopItemType = "permanent" | "consumable" | (string & {});
+
 export type GRushShopProduct = {
   /** 作者が付けた商品の識別子（`^[a-z0-9][a-z0-9_.-]{0,63}$`）。 */
   sku: string;
@@ -256,19 +264,35 @@ export type GRushShopProduct = {
   name: string;
   /** 税込みの価格（円）。 */
   priceJpy: number;
+  /**
+   * 商品の種類。`products()` はいつも入れて返し、種類を返さない古い GameRush の商品は `"permanent"`。
+   * モックの `shopProducts` では省けて、省くと `"permanent"`。
+   */
+  type?: GRushShopItemType;
 };
 
 export type GRushShopProducts = {
-  /** いま買えるか。アプリと LINE、作者の販売が開いていないとき、販売を止めているときは `false` で、`products` は空。 */
+  /**
+   * いま買えるか。Android のアプリと LINE、作者の販売が開いていないとき、販売を止めているときは `false` で、`products` は空。
+   * iOS のアプリでは、App Store の価格（100・120・300・500・1,000 円）に合う商品だけが入る。
+   */
   enabled: boolean;
   products: GRushShopProduct[];
 };
 
 /**
- * `redirecting`: ページがすぐ決済画面へ移る。`cancelled`: プレイヤーが購入をやめた。`alreadyOwned`: もう持っている。
+ * `redirecting`: ページがすぐ決済画面へ移る（Web）。`purchased`: 買い終え、アイテムが `pending` に入った（iOS のアプリ）。
+ * `pending`: 支払いの確認や保護者の承認を待っている。済むと `pending` に入る（iOS のアプリ）。
+ * `cancelled`: プレイヤーが購入をやめた。`alreadyOwned`: 同じ買い切りの商品をもう持っている（消費のアイテムでは返らない）。
  * 知らない値が増えても読めるよう、文字列のまま渡す。
  */
-export type GRushShopPurchaseStatus = "redirecting" | "cancelled" | "alreadyOwned" | (string & {});
+export type GRushShopPurchaseStatus =
+  | "redirecting"
+  | "purchased"
+  | "pending"
+  | "cancelled"
+  | "alreadyOwned"
+  | (string & {});
 
 export type GRushShopPurchaseResult = { status: GRushShopPurchaseStatus };
 
@@ -548,12 +572,18 @@ export type GRushMockConfig = {
    * `"cancelled"` を返す。既定 1。
    */
   inviteCount: number;
-  /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unsupported` で失敗する（アプリと LINE と同じ）。既定 `true`。 */
+  /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unsupported` で失敗する（Android のアプリと LINE と同じ）。既定 `true`。 */
   shopEnabled: boolean;
-  /** `shop.products` が返す商品。sku・名前・整数の価格がそろわないものは外す。既定は空。 */
+  /**
+   * `shop.products` が返す商品。sku・名前・整数の価格がそろわないものと、`type` が `"permanent"` でも `"consumable"`
+   * でもないものは外す。`type` を省くと `"permanent"`。既定は空。
+   */
   shopProducts: GRushShopProduct[];
-  /** `shop.purchase` の答え。`"cancelled"` にすると付与せずに `cancelled` を返す。既定 `"redirecting"`。 */
-  shopPurchaseStatus: "redirecting" | "cancelled";
+  /**
+   * `shop.purchase` の答え。`"cancelled"` と `"pending"` にすると付与せずにその値を返す。`"purchased"` にすると、iOS の
+   * アプリと同じく付与を `pending` に積んで `purchased` を返し、`onPending` は呼ばない。既定 `"redirecting"`。
+   */
+  shopPurchaseStatus: "redirecting" | "purchased" | "pending" | "cancelled";
 };
 
 export interface GRushMockPeer {
@@ -750,21 +780,25 @@ export interface GRushSdk {
     report(tradeId: string): Promise<GRushResult<boolean>>;
   };
   /**
-   * 作者のアイテムの販売。作者が Studio か API キーで登録した商品を、プレイヤーが Web の GameRush で買う。
+   * 作者のアイテムの販売。作者が Studio か API キーで登録した商品を、プレイヤーが Web の GameRush と iOS のアプリで買う。
+   * 商品の種類は買い切り（`permanent`）と消費（`consumable`）の 2 つ。消費のアイテムを、ゲーム内通貨（ほかのアイテムや
+   * 機能と交換する対価）と抽選（偶然で中身が決まる仕組み）に使ってはならない。
    * サーバが保証するのは、払ったプレイヤーにアイテムが届くことまで。ゲームの中での使用は改ざんを防げない。
    *
    * 取りこぼさないために、次の順で使う。
    * 1. `purchase` を呼ぶ前にセーブしておく。`redirecting` が返ると、ページはすぐ決済画面へ移る。
-   * 2. 起動したときと `onPending` が呼ばれたときに `pending` を読む。
-   * 3. 届いたアイテムをセーブに反映して保存してから `ack` する。`ack` するまで `pending` に残る。
+   * 2. 起動したとき、`onPending` が呼ばれたとき、`purchase` が `purchased` を返したときに `pending` を読む。
+   * 3. 届いたアイテムをセーブに反映して保存してから `ack` する。`ack` は「ゲームへ届けた」ことを表し、するまで `pending` に残る。
+   * 4. 反映した付与の ID をセーブに持ち、同じ付与を二度反映しない。消費のアイテムは `owned` で組み直せないので、特に大事。
    *
    * `protocolVersion` 12 未満の GameRush と GameRush の外では、どれも `unsupported`。
    */
   shop: {
-    /** 商品の一覧。アプリと LINE では `enabled: false` の空。 */
+    /** 商品の一覧。Android のアプリと LINE では `enabled: false` の空。 */
     products(): Promise<GRushResult<GRushShopProducts>>;
     /**
-     * 商品を買う。買えるのは Web の GameRush だけで、アプリと LINE では `unsupported`。sku の形が違えば GameRush へ
+     * 商品を買う。買えるのは Web の GameRush と iOS のアプリで、Android のアプリと LINE では `unsupported`。
+     * 消費の商品は何度でも買え、`alreadyOwned` にならない。sku の形が違えば GameRush へ
      * 送らずに `invalidParams`。ゲストは `signInRequired`。
      */
     purchase(sku: string): Promise<GRushResult<GRushShopPurchaseResult>>;
@@ -775,7 +809,7 @@ export interface GRushSdk {
      * `invalidParams`。
      */
     ack(ids: string[]): Promise<GRushResult<number>>;
-    /** このプレイヤーがこのゲームで受けた付与のすべて。 */
+    /** このプレイヤーがこのゲームで受けた買い切りの付与のすべて。返金された付与と、消費のアイテムの付与は入らない。 */
     owned(): Promise<GRushResult<GRushShopOwnedGrant[]>>;
     /**
      * 決済から戻って付与が届いたときに `handler` を呼ぶ。返り値は解除関数。登録より先に届いていた合図は、

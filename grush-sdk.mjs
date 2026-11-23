@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.17.0
+/*! GameRush SDK for JavaScript v0.18.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -866,11 +866,12 @@ function uuid() {
 function invalid(message) {
   return failure(CODES.invalidParams, message);
 }
+var ITEM_TYPES = ["permanent", "consumable"];
 function productsOf(config) {
   const list = Array.isArray(config.shopProducts) ? config.shopProducts : [];
   return list.filter(
-    (product) => product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && Number.isInteger(product.priceJpy)
-  ).map(({ sku, name, priceJpy }) => ({ sku, name, priceJpy }));
+    (product) => product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && Number.isInteger(product.priceJpy) && (product.type === void 0 || ITEM_TYPES.includes(product.type))
+  ).map(({ sku, name, priceJpy, type = "permanent" }) => ({ sku, name, priceJpy, type }));
 }
 function createMockShop({ config, now = () => Date.now() }) {
   let grants = [];
@@ -903,12 +904,22 @@ function createMockShop({ config, now = () => Date.now() }) {
     if (typeof sku !== "string" || !SKU.test(sku)) return invalid("Invalid sku.");
     if (!enabled()) return failure(CODES.unsupported, "Nothing can be bought here.");
     if (!config.signedIn) return failure(CODES.signInRequired, "Purchases require sign-in.");
-    if (!productsOf(config).some((product) => product.sku === sku)) {
-      return invalid("No product for that sku.");
+    const product = productsOf(config).find((item) => item.sku === sku);
+    if (!product) return invalid("No product for that sku.");
+    const consumable = product.type === "consumable";
+    if (!consumable && grants.some((grant) => grant.sku === sku)) {
+      return ok({ status: "alreadyOwned" });
     }
-    if (grants.some((grant) => grant.sku === sku)) return ok({ status: "alreadyOwned" });
-    if (config.shopPurchaseStatus === "cancelled") return ok({ status: "cancelled" });
-    grants.push({ id: uuid(), sku, createdAt: new Date(now()).toISOString(), acked: false });
+    const status = config.shopPurchaseStatus;
+    if (status === "cancelled" || status === "pending") return ok({ status });
+    grants.push({
+      id: uuid(),
+      sku,
+      createdAt: new Date(now()).toISOString(),
+      acked: false,
+      consumable
+    });
+    if (status === "purchased") return ok({ status });
     signals.push({ sku });
     schedule();
     return ok({ status: "redirecting" });
@@ -933,7 +944,9 @@ function createMockShop({ config, now = () => Date.now() }) {
     }
     return ok(acked);
   }
-  const owned = () => ok(grants.map((grant) => ({ ...grantWire(grant), acked: grant.acked })));
+  const owned = () => ok(
+    grants.filter((grant) => !grant.consumable).map((grant) => ({ ...grantWire(grant), acked: grant.acked }))
+  );
   function onPending(next) {
     const own = {};
     handler = next;
@@ -2332,7 +2345,12 @@ function inviteResultOf(raw) {
 }
 function shopProductOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
-  return { sku: raw.sku, name: text(raw.name), priceJpy: number(raw.priceJpy) };
+  return {
+    sku: raw.sku,
+    name: text(raw.name),
+    priceJpy: number(raw.priceJpy),
+    type: text(raw.type) || "permanent"
+  };
 }
 function shopProductsOf(raw) {
   if (!raw || typeof raw !== "object" || !Array.isArray(raw.products)) return null;
@@ -2529,7 +2547,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.17.0";
+var VERSION = "0.18.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
