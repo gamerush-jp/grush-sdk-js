@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.18.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.19.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -68,7 +68,7 @@ TypeScript の型は `grush-sdk.d.ts`。
 | `GRush.trade.create({ offer, want, offerKey, wantKey, to, expiresInSec, operationId })` / `list(...)` / `mine()` / `accept(tradeId, give)` / `cancel(tradeId)` / `ack(ids)` / `report(tradeId)` | 出品 / `{ trades, nextCursor }` / `{ open, pending }` / `{ outcome, trade }` / 出品 / 件数 / 承諾されたか（下記） |
 | `GRush.shop.products()` / `purchase(sku)` / `pending()` / `ack(ids)` / `owned()` | `{ enabled, products }` / `{ status }` / 付与の配列 / 件数 / 付与の配列（アイテムの販売。下記） |
 | `GRush.shop.onPending(handler)` | 解除関数（決済から戻って付与が届いたときに `handler` を呼ぶ。下記） |
-| `GRush.cloudSave.load(slot, { fallback })` / `save(payload, slot, { baseRevision, fallback })` / `remove(slot, { fallback })` | `{ slot, payload, revision, createdAt, updatedAt, storage }` など（下記） |
+| `GRush.cloudSave.load(slot, { fallback })` / `save(payload, slot, { baseRevision, fallback })` / `remove(slot, { fallback })` | `{ slot, payload, revision, createdAt, updatedAt, storage, synced }` など（下記） |
 | `GRush.share.share({ text, image, launchParams })` | `{ status: "opened" \| "cancelled" }`（下記） |
 | `GRush.share.isAvailable()` | `true` / `false`（結果オブジェクトではなく真偽値。失敗しない） |
 | `GRush.locale.get()` | `{ locale, source, languages }`（下記） |
@@ -103,12 +103,15 @@ if (loaded.ok) {
 ```
 
 - payload は JSON にして 256KB まで。スロット名は英数字と `.` `_` `:` `-` の 1〜64 文字で、省略すると `default`。外れると `invalidParams`
+- サインインしているときの `save` は、GameRush が端末に控えた時点で `synced: false` で返り、クラウドへは後からまとめて送られる。届く前でも、同じ端末の `load` は最後に保存した中身を返す。`revision` はクラウドに書けたときに付くと見込んだ版で、次の `save` の `baseRevision` にそのまま渡せる
+- 別の端末の方が新しく、控えた保存をクラウドへ送れなかったときは、クラウドを上書きしない。そのスロットの次の `save` が `conflict` になるので、`load` してから書き直す
+- `shop.purchase` / `shop.ack` / `trade.create` / `trade.accept` / `trade.ack` は、呼ぶ前に控えた保存をクラウドへ送り切る。送り切れなければ `unavailable` になるので、時間を置いて呼び直す
 - 15 秒待っても GameRush から答えが無ければ `timeout` で返る。`load` / `save` / `remove` の Promise が答えを待ったまま止まることは無い。`timeout` の `save` は届いたかどうか分からないので、`load` で確かめてから書き直すか、`baseRevision` を付けて送り直す
-- 保存の回数に GameRush が決めた上限は無い。それでも毎フレームは呼ばず、区切りのよいところでまとめて保存する
+- 保存の回数に GameRush が決めた上限は無い。それでも毎フレームは呼ばず、区切りのよいところで保存する
 - `fallback: "local"` を渡すと、GameRush がプレイヤーのサインインを確かめられないとき（渡さなければ `signInRequired` になるとき）だけ、セーブを端末に読み書きする。そのとき返る項目は `storage: "local"`、`revision: 0`。クラウドに置けたときは `storage: "cloud"`
-- 端末のセーブはその端末のそのアプリ（ブラウザ）にだけあり、ブラウザが消すことがある。サインインしても自動ではクラウドへ上がらない。サインイン後の `load` でクラウドに無ければ端末のセーブが返るので、それを `save` するとクラウドへ上がる。`fallback: "local"` 付きの `save` / `remove` がクラウドで成功すると、同じスロットの、そのプレイヤーの端末のセーブと、どのアカウントのものか分からない端末のセーブが消える。別のアカウントのものは残る
+- 端末のセーブはその端末のそのアプリ（ブラウザ）にだけあり、ブラウザが消すことがある。サインインしても自動ではクラウドへ上がらない。サインイン後の `load` でクラウドに無ければ端末のセーブが返るので、それを `save` するとクラウドへ上がる。`fallback: "local"` 付きの `save`（`synced: true` で返ったもの）/ `remove` がクラウドで成功すると、同じスロットの、そのプレイヤーの端末のセーブと、どのアカウントのものか分からない端末のセーブが消える。別のアカウントのものは残る
 - サインイン済みの `load` は、別のアカウントのものと分かっている端末のセーブを返さない。サインインを確かめられないときの `load` と `remove` は、どのアカウントで保存したかに関係なく、その端末のセーブを返し、消す。共用の端末では、前に使った人の端末のセーブが返ることがある
-- サインインが戻るとクラウドのセーブが優先される。サインインを確かめられなかった間に端末へ保存した新しい分は、クラウドにセーブがあれば `load` で返らない。`fallback: "local"` 付きの保存がクラウドで成功すると、そのプレイヤーの端末のセーブは消える
+- サインインが戻るとクラウドのセーブが優先される。サインインを確かめられなかった間に端末へ保存した新しい分は、クラウドにセーブがあれば `load` で返らない。`fallback: "local"` 付きの保存がクラウドに書けて `synced: true` で返ると、そのプレイヤーの端末のセーブは消える
 - 端末への書き込みでは `baseRevision` を見ない。端末のセーブの `revision`（`0`）をそのまま `baseRevision` に渡すと、クラウドが空なら書け、クラウドにあれば `conflict` になる
 - サインイン直後の `save` が `conflict` になったら、`load` してから書き直す
 - `fallback` に `"local"` と `null` 以外を渡すと `invalidParams`。`null` は渡さないときと同じ。古い GameRush（`protocolVersion` 5 未満）では `fallback` を無視し、渡さないときと同じ呼び出しになる

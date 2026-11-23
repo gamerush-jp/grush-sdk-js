@@ -254,6 +254,18 @@ test("cloud save tells where the save lives and checks fallback in the runtime",
     Promise.resolve({ slot: "default", payload: { c: 1 }, revision: 1, storage: "somewhere" });
   assert.equal((await sdk.cloudSave.load()).value.storage, "cloud");
 
+  // A save GameRush only kept on the device reports synced: false. Older GameRush omits the field
+  // and answers after the write, so a cloud save without it is synced. A device save never is.
+  runtime.CloudSave.loadWithMetadata = () =>
+    Promise.resolve({ slot: "default", payload: { c: 1 }, revision: 2, storage: "cloud", synced: false });
+  assert.equal((await sdk.cloudSave.load()).value.synced, false);
+  runtime.CloudSave.loadWithMetadata = () =>
+    Promise.resolve({ slot: "default", payload: { c: 1 }, revision: 2, storage: "cloud" });
+  assert.equal((await sdk.cloudSave.load()).value.synced, true);
+  runtime.CloudSave.loadWithMetadata = () =>
+    Promise.resolve({ slot: "default", payload: { c: 1 }, revision: 0, storage: "local" });
+  assert.equal((await sdk.cloudSave.load()).value.synced, false);
+
   runtime.CloudSave.save = () => Promise.reject(new Error("Invalid cloud save fallback."));
   assert.equal(
     (await sdk.cloudSave.save({ c: 1 }, "default", { fallback: "disk" })).code,
