@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.17.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.18.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -235,19 +235,29 @@ GRush.shop.onPending(() => receiveItems());
 receiveItems();
 
 const shop = await GRush.shop.products();
-if (shop.ok && shop.value.enabled) showShop(shop.value.products); // { sku, name, priceJpy }
+if (shop.ok && shop.value.enabled) showShop(shop.value.products); // { sku, name, priceJpy, type }
 
 // 買う前にセーブする。redirecting が返ると、ページはすぐ決済画面へ移る。
 await GRush.cloudSave.save(save);
-const bought = await GRush.shop.purchase("gem_pack");
+const bought = await GRush.shop.purchase("potion.heal");
+if (bought.ok && bought.value.status === "purchased") receiveItems(); // iOS のアプリは、買い終えると pending に入れる
 ```
 
-- 作者が Studio か API キーで登録した商品（sku・商品名・税込みの価格）を、プレイヤーが買う。ゲームは `products()` で一覧を読む
-- **買えるのは Web の GameRush だけ。** アプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空。作者の販売が開いていないときも `enabled: false` の空。`pending`・`ack`・`owned` も今はアプリと LINE では `unsupported`（Web で買った分は Web で受け取る）
-- `purchase(sku)` の `status` は `redirecting`（ページがすぐ決済画面へ移る）・`cancelled`（プレイヤーがやめた）・`alreadyOwned`（もう持っている）。**ゲームは `purchase` を呼ぶ前にセーブしておく。** sku が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ GameRush へ送らずに `invalidParams`。ゲストは `signInRequired`
-- **付与は `ack` するまで `pending` に残る。** アイテムをセーブに反映して保存してから `ack(ids)` する。`ids` は 1〜100 件の付与 ID で、合わなければ GameRush へ送らずに `invalidParams`。`pending` は 1 回に最大 100 件（古い順）なので、`ack` したら、残りがあればもう一度読む。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む。反映済みの付与 ID をセーブに持てば、同じ付与を二度反映しない
+- 作者が Studio か API キーで登録した商品（sku・商品名・税込みの価格・種類）を、プレイヤーが買う。ゲームは `products()` で一覧を読む
+- 商品の種類（`type`）は 2 つ。種類を返さない古い GameRush の商品は `"permanent"` として返す
+
+  | `type` | 買える回数 | `owned()` |
+  |---|---|---|
+  | `"permanent"`（買い切り） | 同じプレイヤーは、返金されない限り 1 回だけ | 入る |
+  | `"consumable"`（消費） | 同じプレイヤーが何度でも | 入らない |
+
+- **消費のアイテムを、ゲーム内通貨（ほかのアイテムや機能と交換する対価）として使うことと、抽選（ガチャなど、偶然で中身が決まる仕組み）に使わせることはできない。** 販売に関する取り決めで禁じている
+- **買えるのは Web の GameRush と iOS のアプリ。** Android のアプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空で、`pending`・`ack`・`owned` も `unsupported`。作者の販売が開いていないときも `enabled: false` の空。iOS のアプリでは App Store のアプリ内課金で買い、価格が 100・120・300・500・1,000 円のどれかの商品だけが `products()` に出る
+- `purchase(sku)` の `status` は `redirecting`（ページがすぐ決済画面へ移る。Web）・`purchased`（買い終え、アイテムが `pending` に入った。iOS のアプリ）・`pending`（支払いの確認や保護者の承認を待っている。済むと `pending` に入る。iOS のアプリ）・`cancelled`（プレイヤーがやめた）・`alreadyOwned`（同じ買い切りの商品をもう持っている。消費のアイテムでは返らない）。知らない値も文字列のまま返る。**ゲームは `purchase` を呼ぶ前にセーブしておく。** sku が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ GameRush へ送らずに `invalidParams`。ゲストは `signInRequired`
+- **付与は `ack` するまで `pending` に残る。** `ack` は「ゲームへ届けた」ことを表す。アイテムをセーブに反映して保存してから `ack(ids)` する。`ids` は 1〜100 件の付与 ID で、合わなければ GameRush へ送らずに `invalidParams`。`pending` は 1 回に最大 100 件（古い順）なので、`ack` したら、残りがあればもう一度読む。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む
+- **反映した付与の ID をセーブに持ち、同じ付与を二度反映しない。** 消費のアイテムは `owned()` で組み直せないので、買い切りのアイテムよりも大事。保存の前に `ack` すると、保存に失敗したときに買ったアイテムが失われる
 - `onPending(handler)` は、決済から戻って付与が届いたときに `{ sku }` で1回呼ばれる。登録より先に届いていた合図は、登録したときに1回だけ渡るので、起動したらすぐ登録する。返り値は解除関数。`handler` はそれぞれ別の複製を受け取り、`GRush.configure({ backend })` でバックエンドを切り替えても購読は続く
-- `owned()` は、このプレイヤーがこのゲームで受けた付与のすべて（`ack` 済みかを `acked` で返す）
+- `owned()` は、このプレイヤーがこのゲームで受けた買い切りの付与のすべて（`ack` 済みかを `acked` で返す）。返金された付与と、消費のアイテムの付与は入らない。機種を替えたときなど、セーブを組み直すときに読む
 - サーバが保証するのは、払ったプレイヤーにアイテムが届くことまで。ゲームの中での使用は改ざんを防げない
 - 呼びすぎは `rateLimited`（`retryAfterMs` 付き）。`purchase` は答えを最大 10 分待ち、過ぎると `timeout`
 - 古い GameRush（`protocolVersion` 12 未満）では、どれも `unsupported` で、`onPending` の `handler` は呼ばれない
@@ -446,11 +456,15 @@ GRush.mock.definePlayerState("custom-rival", { level: 3 }, { rating: 1300 });
 GRush.mock.previewPlayerState("custom-rival", { level: 3 }, { rating: 1300 });
 ```
 
-アイテムの販売のモックは、決済を飛ばす。`GRush.mock.config.shopProducts`（既定は空）に置いた商品を `products()` が返し、`purchase(sku)` はすぐ付与を `pending` に積んで `redirecting` を返し、`onPending` の `handler` を呼ぶ（非同期）。ページは移らない。持っている sku は `alreadyOwned`、一覧に無い sku は `invalidParams`、`signedIn: false` では `signInRequired`。`config.shopPurchaseStatus = "cancelled"` で付与せずに `cancelled` を、`config.shopEnabled = false` で Web 以外の面と同じく `enabled: false` の空を返す（`purchase` はアプリ・LINE と同じく `unsupported`）。`pending` は GameRush と同じく 1 回に最大 100 件を返す。呼び出しの間隔の上限は再現しない。付与は `reset()` で消える。
+アイテムの販売のモックは、決済を飛ばす。`GRush.mock.config.shopProducts`（既定は空）に置いた商品を `products()` が返し、`purchase(sku)` はすぐ付与を `pending` に積んで `redirecting` を返し、`onPending` の `handler` を呼ぶ（非同期）。ページは移らない。商品の `type` は `"permanent"` か `"consumable"` で、省くと `"permanent"`（ほかの値の商品は外す）。持っている買い切りの sku は `alreadyOwned`。消費の sku は何度でも買え、そのたびに付与を積み、`owned()` には入らない。一覧に無い sku は `invalidParams`、`signedIn: false` では `signInRequired`。`config.shopPurchaseStatus = "cancelled"` で付与せずに `cancelled` を、`"pending"` で付与せずに `pending`（承認の待ち）を、`"purchased"` で iOS のアプリと同じく付与を積んで `purchased` を（`onPending` は呼ばない）、`config.shopEnabled = false` で Android のアプリ・LINE と同じく `enabled: false` の空を返す（`purchase` も同じく `unsupported`）。`pending` は GameRush と同じく 1 回に最大 100 件を返す。呼び出しの間隔の上限は再現しない。付与は `reset()` で消える。
 
 ```js
-GRush.mock.config.shopProducts = [{ sku: "gem_pack", name: "宝石 100 個", priceJpy: 120 }];
-await GRush.shop.purchase("gem_pack"); // onPending が { sku: "gem_pack" } で呼ばれ、pending に載る
+GRush.mock.config.shopProducts = [
+  { sku: "stage.extra", name: "追加ステージ", priceJpy: 300 }, // type を省くと permanent
+  { sku: "potion.heal", name: "回復薬", priceJpy: 120, type: "consumable" },
+];
+await GRush.shop.purchase("potion.heal"); // onPending が { sku: "potion.heal" } で呼ばれ、pending に載る
+await GRush.shop.purchase("potion.heal"); // 消費なので、もう 1 件積む
 ```
 
 `GRush.mock.previewPlayerState(pseudoId, payload, { revision, rating })` は、`GRush.playerState.onPreview` の `handler` に確認用の表示の状態を渡す。渡すのは呼び出しの後（非同期）で、`handler` が無ければ次に登録したときに渡す。`revision` は省略すると 1、`rating` は省略すると `null`。形が合わなければ何もせず `false` を返す。

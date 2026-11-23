@@ -247,10 +247,17 @@ export function inviteResultOf(raw) {
   return sent ? { status: "sent", count: raw.count } : { status: "cancelled", count: 0 };
 }
 
-// GameRush checks the sku, name and price when the author registers a product, so only the shape is kept.
+// GameRush checks the sku, name, price and type when the author registers a product, so only the shape is
+// kept. A runtime that sends no type predates consumable items, so its products are all permanent. A type this
+// SDK does not know yet is passed through as is, so a newer GameRush still reads.
 function shopProductOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
-  return { sku: raw.sku, name: text(raw.name), priceJpy: number(raw.priceJpy) };
+  return {
+    sku: raw.sku,
+    name: text(raw.name),
+    priceJpy: number(raw.priceJpy),
+    type: text(raw.type) || "permanent",
+  };
 }
 
 export function shopProductsOf(raw) {

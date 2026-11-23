@@ -60,7 +60,7 @@ test("shop calls GRushShop from protocol 12 and reads its results", async () => 
   const products = await sdk.shop.products();
   assert.deepEqual(products.value, {
     enabled: true,
-    products: [{ sku: "gem_pack", name: "Gems", priceJpy: 120 }],
+    products: [{ sku: "gem_pack", name: "Gems", priceJpy: 120, type: "permanent" }],
   });
   assert.deepEqual((await sdk.shop.purchase("gem_pack")).value, { status: "redirecting" });
   assert.deepEqual((await sdk.shop.pending()).value, [
@@ -90,6 +90,39 @@ test("shop reads bare results too", async () => {
   assert.equal((await sdk.shop.pending()).value.length, 1);
   assert.equal((await sdk.shop.ack([GRANT_ID])).value, 2);
   assert.equal((await sdk.shop.owned()).value[0].acked, false);
+});
+
+test("shop keeps the item type and reads a missing one as permanent", async () => {
+  installRuntime(12, {
+    products: {
+      enabled: true,
+      products: [
+        { sku: "stage.extra", name: "Stage", priceJpy: 300, type: "permanent" },
+        { sku: "potion.heal", name: "Potion", priceJpy: 120, type: "consumable" },
+        { sku: "old", name: "Old", priceJpy: 100 },
+        { sku: "odd", name: "Odd", priceJpy: 100, type: 3 },
+        { sku: "next", name: "Next", priceJpy: 100, type: "subscription" },
+      ],
+    },
+  });
+  const result = await createGRush().shop.products();
+  assert.deepEqual(
+    result.value.products.map((product) => [product.sku, product.type]),
+    [
+      ["stage.extra", "permanent"],
+      ["potion.heal", "consumable"],
+      ["old", "permanent"],
+      ["odd", "permanent"],
+      ["next", "subscription"],
+    ],
+  );
+});
+
+test("purchase passes through the statuses of the iOS app", async () => {
+  for (const status of ["purchased", "pending", "alreadyOwned", "somethingNew"]) {
+    installRuntime(12, { ...RESULTS, purchase: { status } });
+    assert.deepEqual((await createGRush().shop.purchase("gem_pack")).value, { status });
+  }
 });
 
 test("a closed shop lists no products", async () => {
@@ -202,7 +235,7 @@ test("the mock sells the configured products and grants at once", async () => {
     { sku: "Bad", name: "Bad", priceJpy: 100 },
   ];
   assert.deepEqual((await sdk.shop.products()).value.products, [
-    { sku: "gem_pack", name: "Gems", priceJpy: 120 },
+    { sku: "gem_pack", name: "Gems", priceJpy: 120, type: "permanent" },
   ]);
 
   const signals = [];
@@ -228,6 +261,48 @@ test("the mock sells the configured products and grants at once", async () => {
   sdk.mock.reset();
   assert.deepEqual((await sdk.shop.owned()).value, []);
   assert.deepEqual(sdk.mock.config.shopProducts, []);
+});
+
+test("the mock sells a consumable item again and leaves it out of owned", async () => {
+  const sdk = mockSdk();
+  sdk.mock.config.shopProducts = [
+    { sku: "stage.extra", name: "Stage", priceJpy: 300, type: "permanent" },
+    { sku: "potion.heal", name: "Potion", priceJpy: 120, type: "consumable" },
+    { sku: "odd", name: "Odd", priceJpy: 100, type: "subscription" },
+  ];
+  assert.deepEqual(
+    (await sdk.shop.products()).value.products.map((product) => [product.sku, product.type]),
+    [
+      ["stage.extra", "permanent"],
+      ["potion.heal", "consumable"],
+    ],
+  );
+  assert.equal((await sdk.shop.purchase("odd")).code, "invalidParams");
+
+  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, { status: "redirecting" });
+  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, { status: "redirecting" });
+  assert.deepEqual((await sdk.shop.purchase("stage.extra")).value, { status: "redirecting" });
+  assert.deepEqual((await sdk.shop.purchase("stage.extra")).value, { status: "alreadyOwned" });
+
+  const pending = (await sdk.shop.pending()).value;
+  assert.deepEqual(
+    pending.map((grant) => grant.sku),
+    ["potion.heal", "potion.heal", "stage.extra"],
+  );
+  assert.notEqual(pending[0].id, pending[1].id);
+  assert.equal((await sdk.shop.ack(pending.map((grant) => grant.id))).value, 3);
+  assert.deepEqual((await sdk.shop.pending()).value, []);
+  assert.deepEqual(
+    (await sdk.shop.owned()).value.map((grant) => [grant.sku, grant.acked]),
+    [["stage.extra", true]],
+  );
+
+  // After an ack the consumable item can still be bought, and the new grant waits in pending.
+  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, { status: "redirecting" });
+  assert.deepEqual(
+    (await sdk.shop.pending()).value.map((grant) => grant.sku),
+    ["potion.heal"],
+  );
 });
 
 test("the mock hands over a signal that arrived before onPending once", async () => {
@@ -265,6 +340,28 @@ test("the mock refuses what GameRush refuses", async () => {
   sdk.mock.config.shopEnabled = false;
   assert.deepEqual((await sdk.shop.products()).value, { enabled: false, products: [] });
   assert.equal((await sdk.shop.purchase("gem_pack")).code, "unsupported");
+});
+
+test("the mock answers like the iOS app when asked to", async () => {
+  const sdk = mockSdk();
+  sdk.mock.config.shopProducts = [
+    { sku: "potion.heal", name: "Potion", priceJpy: 120, type: "consumable" },
+  ];
+  const signals = [];
+  sdk.shop.onPending((event) => signals.push(event));
+
+  sdk.mock.config.shopPurchaseStatus = "pending";
+  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, { status: "pending" });
+  assert.deepEqual((await sdk.shop.pending()).value, []);
+
+  sdk.mock.config.shopPurchaseStatus = "purchased";
+  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, { status: "purchased" });
+  await flush();
+  assert.deepEqual(signals, []);
+  assert.deepEqual(
+    (await sdk.shop.pending()).value.map((grant) => grant.sku),
+    ["potion.heal"],
+  );
 });
 
 test("the mock hands over at most 100 pending grants, oldest first", async () => {

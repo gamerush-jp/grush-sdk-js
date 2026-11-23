@@ -20,8 +20,12 @@ function invalid(message) {
   return failure(CODES.invalidParams, message);
 }
 
+// The kinds of item GameRush sells. A permanent item is bought once; a consumable one any number of times.
+const ITEM_TYPES = ["permanent", "consumable"];
+
 // The configured products that GameRush would accept from the author. Others are left out, so a typo in
-// the config shows up as a missing product instead of a product GameRush could never sell.
+// the config shows up as a missing product instead of a product GameRush could never sell. A product
+// without a type is permanent, as on GameRush.
 function productsOf(config) {
   const list = Array.isArray(config.shopProducts) ? config.shopProducts : [];
   return list
@@ -33,14 +37,16 @@ function productsOf(config) {
         SKU.test(product.sku) &&
         typeof product.name === "string" &&
         product.name &&
-        Number.isInteger(product.priceJpy),
+        Number.isInteger(product.priceJpy) &&
+        (product.type === undefined || ITEM_TYPES.includes(product.type)),
     )
-    .map(({ sku, name, priceJpy }) => ({ sku, name, priceJpy }));
+    .map(({ sku, name, priceJpy, type = "permanent" }) => ({ sku, name, priceJpy, type }));
 }
 
 // The author's item shop of the mock. A purchase skips the payment: the grant goes straight to pending and
 // the onPending handler is called, as if the player had paid and come back. Handlers resolve the same bare
-// values as the GameRush runtime ({ enabled, products }, { status }, a count…).
+// values as the GameRush runtime ({ enabled, products }, { status }, a count…). Like GameRush, a permanent
+// item already granted is alreadyOwned, while a consumable item can be bought again and never shows in owned.
 export function createMockShop({ config, now = () => Date.now() }) {
   let grants = [];
   const signals = [];
@@ -79,12 +85,24 @@ export function createMockShop({ config, now = () => Date.now() }) {
     // Like the app and LINE, where nothing can be bought.
     if (!enabled()) return failure(CODES.unsupported, "Nothing can be bought here.");
     if (!config.signedIn) return failure(CODES.signInRequired, "Purchases require sign-in.");
-    if (!productsOf(config).some((product) => product.sku === sku)) {
-      return invalid("No product for that sku.");
+    const product = productsOf(config).find((item) => item.sku === sku);
+    if (!product) return invalid("No product for that sku.");
+    const consumable = product.type === "consumable";
+    if (!consumable && grants.some((grant) => grant.sku === sku)) {
+      return ok({ status: "alreadyOwned" });
     }
-    if (grants.some((grant) => grant.sku === sku)) return ok({ status: "alreadyOwned" });
-    if (config.shopPurchaseStatus === "cancelled") return ok({ status: "cancelled" });
-    grants.push({ id: uuid(), sku, createdAt: new Date(now()).toISOString(), acked: false });
+    const status = config.shopPurchaseStatus;
+    // Like the iOS app: "pending" waits for an approval and grants nothing yet.
+    if (status === "cancelled" || status === "pending") return ok({ status });
+    grants.push({
+      id: uuid(),
+      sku,
+      createdAt: new Date(now()).toISOString(),
+      acked: false,
+      consumable,
+    });
+    // Like the iOS app: "purchased" puts the grant in pending without leaving the page, so no signal follows.
+    if (status === "purchased") return ok({ status });
     signals.push({ sku });
     schedule();
     return ok({ status: "redirecting" });
@@ -116,7 +134,12 @@ export function createMockShop({ config, now = () => Date.now() }) {
     return ok(acked);
   }
 
-  const owned = () => ok(grants.map((grant) => ({ ...grantWire(grant), acked: grant.acked })));
+  const owned = () =>
+    ok(
+      grants
+        .filter((grant) => !grant.consumable)
+        .map((grant) => ({ ...grantWire(grant), acked: grant.acked })),
+    );
 
   // Mirrors GameRush: one handler, replaced by the next registration. A signal that arrived before any
   // handler is handed over once, when one is registered.
