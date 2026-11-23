@@ -86,6 +86,7 @@ async function useSdk(): Promise<void> {
   if (loaded.ok && loaded.value) {
     const storage: "cloud" | "local" = loaded.value.storage;
     const synced: boolean = loaded.value.synced;
+    void synced;
     void storage;
     await GRush.cloudSave.save(loaded.value.payload, "default", {
       baseRevision: loaded.value.revision,
