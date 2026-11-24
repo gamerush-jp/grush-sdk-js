@@ -12,6 +12,7 @@ export function playerOf(raw) {
     pseudoId: text(source.pseudoId),
     isGuest: source.isGuest !== false,
     profileConsent: consent,
+    isCreator: source.isCreator === true,
     displayName: nullableText(profile.displayName),
     avatarUrl: nullableText(profile.avatarUrl),
   };

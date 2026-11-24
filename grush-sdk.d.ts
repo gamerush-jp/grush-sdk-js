@@ -34,6 +34,13 @@ export type GRushPlayer = {
   pseudoId: string;
   isGuest: boolean;
   profileConsent: boolean;
+  /**
+   * True when the player is this game's owner or an accepted collaborator. GameRush decides it on the
+   * server. Use it to show developer-only UI such as a debug menu. It is not a permission: a player can
+   * edit the game's JavaScript in their own browser, so anything that must stay protected has to be
+   * checked by GameRush, like test purchases in the shop. Always false for guests.
+   */
+  isCreator: boolean;
   displayName: string | null;
   avatarUrl: string | null;
 };

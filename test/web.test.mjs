@@ -147,12 +147,22 @@ test("the GameRush-prefixed aliases are accepted too", () => {
   assert.equal(sdk.backend, "web");
 });
 
+test("isCreator is true only when GameRush says so", async () => {
+  runtime.Player.getSelf = () =>
+    Promise.resolve({ pseudoId: "p1", isGuest: false, profileConsent: false, isCreator: true });
+  assert.equal((await sdk.player.getSelf()).value.isCreator, true);
+  runtime.Player.getSelf = () =>
+    Promise.resolve({ pseudoId: "p1", isGuest: false, profileConsent: false, isCreator: "yes" });
+  assert.equal((await sdk.player.getSelf()).value.isCreator, false);
+});
+
 test("player results hide the profile until consent", async () => {
   const self = await sdk.player.getSelf();
   assert.deepEqual(self.value, {
     pseudoId: "p1",
     isGuest: false,
     profileConsent: false,
+    isCreator: false,
     displayName: null,
     avatarUrl: null,
   });

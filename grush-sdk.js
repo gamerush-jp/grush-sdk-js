@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.19.0
+/*! GameRush SDK for JavaScript v0.20.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -1456,6 +1456,7 @@
       displayName: "Local Player",
       avatarUrl: null,
       grantProfileConsent: true,
+      isCreator: true,
       confirmPlayerStateReport: true,
       confirmInboxReport: true,
       confirmTradeReport: true,
@@ -1633,6 +1634,7 @@
         pseudoId: localPseudoId(),
         isGuest: !config.signedIn,
         profileConsent: consented(),
+        isCreator: config.signedIn && config.isCreator === true,
         profile: { displayName: config.displayName, avatarUrl: config.avatarUrl }
       };
     }
@@ -2145,6 +2147,7 @@
       pseudoId: text(source.pseudoId),
       isGuest: source.isGuest !== false,
       profileConsent: consent,
+      isCreator: source.isCreator === true,
       displayName: nullableText(profile.displayName),
       avatarUrl: nullableText(profile.avatarUrl)
     };
@@ -2551,7 +2554,7 @@
   }
 
   // src/sdk.js
-  var VERSION = "0.19.0";
+  var VERSION = "0.20.0";
   var REQUIRED_PROTOCOL_VERSION = 1;
   var PLAYER_STATE_PROTOCOL_VERSION = 2;
   var SHARE_PROTOCOL_VERSION = 3;

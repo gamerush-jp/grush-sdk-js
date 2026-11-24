@@ -42,6 +42,17 @@ test("configure forces a backend", () => {
   assert.equal(sdk.backend, "none");
 });
 
+test("isCreator follows the mock config and is false for guests", async () => {
+  sdk.mock.reset();
+  assert.equal((await sdk.player.getSelf()).value.isCreator, true);
+  sdk.mock.config.isCreator = false;
+  assert.equal((await sdk.player.getSelf()).value.isCreator, false);
+  sdk.mock.config.isCreator = true;
+  sdk.mock.config.signedIn = false;
+  assert.equal((await sdk.player.getSelf()).value.isCreator, false);
+  sdk.mock.reset();
+});
+
 test("profile consent follows the mock config", async () => {
   sdk.mock.reset();
   const before = await sdk.player.getSelf();

@@ -57,7 +57,7 @@ TypeScript の型は `grush-sdk.d.ts`。
 
 | 呼び出し | 返る `value` |
 |---|---|
-| `GRush.player.getSelf()` / `requestProfile()` / `revokeProfile()` | `{ pseudoId, isGuest, profileConsent, displayName, avatarUrl }` |
+| `GRush.player.getSelf()` / `requestProfile()` / `revokeProfile()` | `{ pseudoId, isGuest, profileConsent, isCreator, displayName, avatarUrl }`（`isCreator` は下記） |
 | `GRush.leaderboards.list()` | ランキング定義の配列（定義は Studio かビルドの `grush.json` で作者が宣言する） |
 | `GRush.leaderboards.submit(key, value, { metadata, operationId })` | `{ accepted, updated, value, rank, verified }` |
 | `GRush.leaderboards.top(key, { limit, offset })` / `aroundMe(key, { range })` / `friends(key, { limit })` | `{ key, title, entries, total, verified, ... }` |
@@ -87,6 +87,20 @@ TypeScript の型は `grush-sdk.d.ts`。
 失敗時の `code` は `unsupported` / `unavailable` / `timeout` / `rateLimited`（`retryAfterMs` 付き）/ `signInRequired` / `consentDeclined` / `invalidParams` / `conflict`（クラウドセーブの版ずれ）/ `previewRequired`（`onPreview` を購読せずに他プレイヤーの公開状態を読んだ）/ `internal`。
 
 集約が `sum` のランキングへ投稿を再送するときは、必ず同じ `operationId` を渡すこと。渡さないと二重に加算される。
+
+### 作者かどうか
+
+`isCreator` は、遊んでいる人がこのゲームのオーナーか、承諾済みの共同制作者なら `true`。GameRush のサーバが決め、ゲームから変えられない。デバッグメニューのような、作者にだけ見せる表示の出し分けに使う。
+
+```js
+const self = await GRush.player.getSelf();
+if (self.ok && self.value.isCreator) showDebugMenu();
+```
+
+- **権限ではない。** ゲームの JavaScript は遊ぶ人のブラウザで動くので、書き換えれば作者でなくても `true` に見せられる。アイテムの付与やスコアのように守りたいことを、このフラグだけで許さない。課金のテストは、GameRush が作者かどうかを確かめるテスト購入（下記「アイテムの販売」）を使う
+- ゲストは常に `false`
+- 共同制作者を承諾したとき・外したときは、反映に最大 30 秒ほどかかる
+- モックは既定で `true`。`GRush.mock.config.isCreator = false` で作者でない人として試せる（`signedIn: false` では常に `false`）
 
 ### クラウドセーブ
 

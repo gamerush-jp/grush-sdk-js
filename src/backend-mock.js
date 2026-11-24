@@ -112,6 +112,7 @@ export function defaultMockConfig() {
     displayName: "Local Player",
     avatarUrl: null,
     grantProfileConsent: true,
+    isCreator: true,
     confirmPlayerStateReport: true,
     confirmInboxReport: true,
     confirmTradeReport: true,
@@ -325,6 +326,7 @@ export function createMockBackend(config) {
       pseudoId: localPseudoId(),
       isGuest: !config.signedIn,
       profileConsent: consented(),
+      isCreator: config.signedIn && config.isCreator === true,
       profile: { displayName: config.displayName, avatarUrl: config.avatarUrl },
     };
   }
