@@ -269,7 +269,7 @@ if (bought.ok && bought.value.status === "purchased") receiveItems(); // iOS の
   | `"consumable"`（消費） | 同じプレイヤーが何度でも | 入らない |
 
 - **消費のアイテムを、ゲーム内通貨（ほかのアイテムや機能と交換する対価）として使うことと、抽選（ガチャなど、偶然で中身が決まる仕組み）に使わせることはできない。** 販売に関する取り決めで禁じている
-- **買えるのは Web の GameRush と iOS のアプリ。** Android のアプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空で、`pending`・`ack`・`owned` も `unsupported`。作者の販売が開いていないときも `enabled: false` の空。iOS のアプリでは App Store のアプリ内課金で買い、価格が 100・120・300・500・1,000 円のどれかの商品だけが `products()` に出る
+- **買えるのは Web の GameRush と iOS のアプリ。** Android のアプリと LINE では `purchase` が `unsupported`、`products` が `enabled: false` の空で、`pending`・`ack`・`owned` も `unsupported`。作者の販売が開いていないときも `enabled: false` の空。iOS のアプリでは App Store のアプリ内課金で買い、価格が `GRush.SHOP_PRICES_JPY` のどれかの商品だけが `products()` に出る
 - `purchase(sku)` の `status` は `redirecting`（ページがすぐ決済画面へ移る。Web）・`purchased`（買い終え、アイテムが `pending` に入った。iOS のアプリ）・`pending`（支払いの確認や保護者の承認を待っている。済むと `pending` に入る。iOS のアプリ）・`cancelled`（プレイヤーがやめた）・`alreadyOwned`（同じ買い切りの商品をもう持っている。消費のアイテムでは返らない）。知らない値も文字列のまま返る。**ゲームは `purchase` を呼ぶ前にセーブしておく。** sku が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ GameRush へ送らずに `invalidParams`。ゲストは `signInRequired`
 - **付与は `ack` するまで `pending` に残る。** `ack` は「ゲームへ届けた」ことを表す。アイテムをセーブに反映して保存してから `ack(ids)` する。`ids` は 1〜100 件の付与 ID で、合わなければ GameRush へ送らずに `invalidParams`。`pending` は 1 回に最大 100 件（古い順）なので、`ack` したら、残りがあればもう一度読む。保存の前に閉じても、次の起動の `pending` でまた届くので、起動時にも `pending` を読む
 - **反映した付与の ID をセーブに持ち、同じ付与を二度反映しない。** 消費のアイテムは `owned()` で組み直せないので、買い切りのアイテムよりも大事。保存の前に `ack` すると、保存に失敗したときに買ったアイテムが失われる
