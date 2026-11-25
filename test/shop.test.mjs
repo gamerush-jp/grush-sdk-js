@@ -233,6 +233,7 @@ test("the mock sells the configured products and grants at once", async () => {
   sdk.mock.config.shopProducts = [
     { sku: "gem_pack", name: "Gems", priceJpy: 120 },
     { sku: "Bad", name: "Bad", priceJpy: 100 },
+    { sku: "odd_price", name: "Odd", priceJpy: 480 },
   ];
   assert.deepEqual((await sdk.shop.products()).value.products, [
     { sku: "gem_pack", name: "Gems", priceJpy: 120, type: "permanent" },
@@ -380,4 +381,10 @@ test("the mock hands over at most 100 pending grants, oldest first", async () =>
     (await sdk.shop.pending()).value.map((grant) => grant.sku),
     ["item100"],
   );
+});
+
+test("the prices an author can set are the GameRush price list", () => {
+  const sdk = mockSdk();
+  assert.deepEqual(sdk.SHOP_PRICES_JPY, [100, 120, 300, 500, 1000, 2000, 3000, 5000]);
+  assert.ok(Object.isFrozen(sdk.SHOP_PRICES_JPY));
 });

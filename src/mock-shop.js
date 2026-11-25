@@ -20,6 +20,9 @@ function invalid(message) {
   return failure(CODES.invalidParams, message);
 }
 
+// The prices (JPY, tax included) GameRush lets authors set on an item.
+export const SHOP_PRICES_JPY = Object.freeze([100, 120, 300, 500, 1000, 2000, 3000, 5000]);
+
 // The kinds of item GameRush sells. A permanent item is bought once; a consumable one any number of times.
 const ITEM_TYPES = ["permanent", "consumable"];
 
@@ -37,7 +40,7 @@ function productsOf(config) {
         SKU.test(product.sku) &&
         typeof product.name === "string" &&
         product.name &&
-        Number.isInteger(product.priceJpy) &&
+        SHOP_PRICES_JPY.includes(product.priceJpy) &&
         (product.type === undefined || ITEM_TYPES.includes(product.type)),
     )
     .map(({ sku, name, priceJpy, type = "permanent" }) => ({ sku, name, priceJpy, type }));

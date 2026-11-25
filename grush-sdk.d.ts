@@ -264,6 +264,12 @@ export type GRushTradePage = {
  */
 export type GRushShopItemType = "permanent" | "consumable" | (string & {});
 
+/**
+ * GameRush で作者が商品に付けられる価格（税込みの円）。Studio の価格の選択肢と同じ。
+ * `GRush.SHOP_PRICES_JPY` に同じ値が並ぶ。
+ */
+export type GRushShopPriceJpy = 100 | 120 | 300 | 500 | 1000 | 2000 | 3000 | 5000;
+
 export type GRushShopProduct = {
   /** 作者が付けた商品の識別子（`^[a-z0-9][a-z0-9_.-]{0,63}$`）。 */
   sku: string;
@@ -278,10 +284,15 @@ export type GRushShopProduct = {
   type?: GRushShopItemType;
 };
 
+/** モックに置く商品。価格は GameRush で付けられる価格（`GRushShopPriceJpy`）から選ぶ。 */
+export type GRushMockShopProduct = Omit<GRushShopProduct, "priceJpy"> & {
+  priceJpy: GRushShopPriceJpy;
+};
+
 export type GRushShopProducts = {
   /**
    * いま買えるか。Android のアプリと LINE、作者の販売が開いていないとき、販売を止めているときは `false` で、`products` は空。
-   * iOS のアプリでは、App Store の価格（100・120・300・500・1,000 円）に合う商品だけが入る。
+   * iOS のアプリでは、App Store の価格（`GRushShopPriceJpy`）に合う商品だけが入る。
    */
   enabled: boolean;
   products: GRushShopProduct[];
@@ -591,10 +602,10 @@ export type GRushMockConfig = {
   /** `false` にすると、`shop.products` が `enabled: false` の空を返し、`shop.purchase` が `unsupported` で失敗する（Android のアプリと LINE と同じ）。既定 `true`。 */
   shopEnabled: boolean;
   /**
-   * `shop.products` が返す商品。sku・名前・整数の価格がそろわないものと、`type` が `"permanent"` でも `"consumable"`
-   * でもないものは外す。`type` を省くと `"permanent"`。既定は空。
+   * `shop.products` が返す商品。sku・名前がそろわないものと、価格が `GRush.SHOP_PRICES_JPY` のどれでもないものと、
+   * `type` が `"permanent"` でも `"consumable"` でもないものは外す。`type` を省くと `"permanent"`。既定は空。
    */
-  shopProducts: GRushShopProduct[];
+  shopProducts: GRushMockShopProduct[];
   /**
    * `shop.purchase` の答え。`"cancelled"` と `"pending"` にすると付与せずにその値を返す。`"purchased"` にすると、iOS の
    * アプリと同じく付与を `pending` に積んで `purchased` を返し、`onPending` は呼ばない。既定 `"redirecting"`。
@@ -681,6 +692,8 @@ export interface GRushSdk {
   readonly CHANNEL_UNRELIABLE: "unreliable";
   readonly EVERYONE: -1;
   readonly MAX_MESSAGE_BYTES: number;
+  /** GameRush で作者が商品に付けられる価格（税込みの円）。小さい順。 */
+  readonly SHOP_PRICES_JPY: readonly GRushShopPriceJpy[];
   readonly backend: GRushBackendKind;
   configure(settings: { backend?: GRushBackendSelection }): void;
   isAvailable(): boolean;
@@ -967,6 +980,7 @@ export interface GRushSdk {
 
 export declare const VERSION: string;
 export declare const CODES: GRushSdk["CODES"];
+export declare const SHOP_PRICES_JPY: GRushSdk["SHOP_PRICES_JPY"];
 export declare function createGRush(options?: { backend?: GRushBackendSelection }): GRushSdk;
 export declare const GRush: GRushSdk;
 export default GRush;

@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.20.0
+/*! GameRush SDK for JavaScript v0.21.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -867,11 +867,12 @@
   function invalid(message) {
     return failure(CODES.invalidParams, message);
   }
+  var SHOP_PRICES_JPY = Object.freeze([100, 120, 300, 500, 1e3, 2e3, 3e3, 5e3]);
   var ITEM_TYPES = ["permanent", "consumable"];
   function productsOf(config) {
     const list = Array.isArray(config.shopProducts) ? config.shopProducts : [];
     return list.filter(
-      (product) => product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && Number.isInteger(product.priceJpy) && (product.type === void 0 || ITEM_TYPES.includes(product.type))
+      (product) => product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && SHOP_PRICES_JPY.includes(product.priceJpy) && (product.type === void 0 || ITEM_TYPES.includes(product.type))
     ).map(({ sku, name, priceJpy, type = "permanent" }) => ({ sku, name, priceJpy, type }));
   }
   function createMockShop({ config, now = () => Date.now() }) {
@@ -2554,7 +2555,7 @@
   }
 
   // src/sdk.js
-  var VERSION = "0.20.0";
+  var VERSION = "0.21.0";
   var REQUIRED_PROTOCOL_VERSION = 1;
   var PLAYER_STATE_PROTOCOL_VERSION = 2;
   var SHARE_PROTOCOL_VERSION = 3;
@@ -2942,6 +2943,7 @@
       CHANNEL_UNRELIABLE: "unreliable",
       EVERYONE: -1,
       MAX_MESSAGE_BYTES,
+      SHOP_PRICES_JPY,
       get backend() {
         return backend().kind;
       },

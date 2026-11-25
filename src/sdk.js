@@ -1,6 +1,7 @@
 import { createMockBackend, defaultMockConfig } from "./backend-mock.js";
 import { createWebBackend, isRuntimePresent } from "./backend-web.js";
 import { MAX_MESSAGE_BYTES } from "./bytes.js";
+import { SHOP_PRICES_JPY } from "./mock-shop.js";
 import {
   acceptResultOf,
   cloudSaveOf,
@@ -29,7 +30,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.20.0";
+export const VERSION = "0.21.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -505,6 +506,7 @@ export function createGRush(options = {}) {
     CHANNEL_UNRELIABLE: "unreliable",
     EVERYONE: -1,
     MAX_MESSAGE_BYTES,
+    SHOP_PRICES_JPY,
     get backend() {
       return backend().kind;
     },

@@ -196,7 +196,10 @@ async function useSdk(): Promise<void> {
   local.mock.config.shopProducts = [
     { sku: "gem_pack", name: "Gems", priceJpy: 120 },
     { sku: "potion.heal", name: "Potion", priceJpy: 120, type: "consumable" },
+    { sku: "big_pack", name: "Big", priceJpy: GRush.SHOP_PRICES_JPY[7] },
   ];
+  // @ts-expect-error the price must be one GameRush lets authors set.
+  local.mock.config.shopProducts = [{ sku: "odd", name: "Odd", priceJpy: 480 }];
   local.mock.config.shopPurchaseStatus = "cancelled";
   local.mock.config.shopPurchaseStatus = "purchased";
   local.mock.config.shopEnabled = false;
