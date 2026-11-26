@@ -507,6 +507,35 @@ const launched = await GRush.launch.get(); // launched.value.invite は { mode: 
 - `period` が `daily` / `weekly` / `monthly` の枠は、GameRush と同じ期間キー（UTC）を返し、期間が変わると空からやり直す
 - `reset()` の後は、次のランキングの呼び出しで `grush.json` を読み直す
 
+## CLI でアップロード
+
+ターミナルから GameRush へビルドを上げる `grush` コマンドが付いている。Node.js 20 以上で動き、依存は無い。npm には出していないので、GitHub から直接実行する（`-p` の後は版のタグでもよい）。
+
+```bash
+npx -p github:gamerush-jp/grush-sdk-js grush login
+npx -p github:gamerush-jp/grush-sdk-js grush upload ./dist --game <ゲーム ID>
+```
+
+このリポジトリを submodule で入れているなら `node vendor/grush-sdk-js/bin/grush.mjs …` でも同じ。
+
+| コマンド | 内容 |
+|---|---|
+| `grush login [--origin URL]` | 既定のブラウザで GameRush の承認画面を開き、承認するとトークンを保存する。開かないときは表示された URL を開く。5 分で時間切れ |
+| `grush upload <フォルダ\|zip> --game <ゲーム ID>` | 既存のゲームへビルドを上げる。ゲーム ID は Studio のゲームの URL の末尾 |
+| `grush upload <フォルダ\|zip> --new <タイトル> [--yes]` | ゲームを `private` で作ってからビルドを上げる。作る前に、利用規約への同意と素材の権利の確認を聞く（CI など対話できないところでは、確認した上で `--yes` を付ける） |
+| `grush whoami`（`status`） | 使うトークンの接続先・権限・期限 |
+| `grush logout` | 保存したトークンを消す |
+
+- ログインで求める権限は Unity の Editor 拡張と同じ（`games:read`・`games:create`・`builds:write`・`leaderboards:read`・`leaderboards:write`）。トークンの期限は 90 日で、切れたら `grush login` し直す
+- トークンは `%APPDATA%\GameRush\cli-token.json` / `~/Library/Application Support/GameRush/cli-token.json` / `$XDG_CONFIG_HOME/gamerush/cli-token.json`（無ければ `~/.config/gamerush/`）に、本人だけが読める権限で置く。本人だけに絞れないときは保存しない
+- `grush logout` は手元のファイルを消すだけで、トークンは期限まで有効なまま。もう使わないなら Studio の **API トークン** から失効させる
+- 環境変数 `GRUSH_TOKEN` に Studio で発行した API トークン（`grush_pat_…`）を入れると、保存したトークンの代わりにそれを使う。CI はこちらを使う。`GRUSH_ORIGIN` で接続先を変えられる
+- フォルダの中身をそのまま上げる。zip の中身が1つのフォルダに入っていて、剥がすと一番上に `index.html` が来るとき（と Godot の書き出しになるとき）は、Studio と同じくそのフォルダを剥がす。`__MACOSX` と `.DS_Store`、ソースマップ（`.js.map` / `.css.map`）、圧縮した HTML は除く。パスワード付きの zip と ZIP64 は読めない
+- 上げる前に、GameRush と同じ規則（合計 50MB・2000 ファイル・使える拡張子・パス・入口の `index.html`）で手元を検査する
+- 一番上の `grush.json` はビルドと一緒に上がり、ランキングの定義として反映される（書式は SDK ガイドのランキング）
+- Unity と Godot のビルドを GameRush のプレイヤーで起動させるには、Unity の Editor 拡張か Studio から上げる。CLI は `index.html` をそのまま使う
+- 公開の設定と審査の申請は Studio で行う
+
 ## サンプル
 
 | サンプル | 内容 |

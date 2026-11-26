@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.21.0
+/*! GameRush SDK for JavaScript v0.22.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -2554,7 +2554,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.21.0";
+var VERSION = "0.22.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
