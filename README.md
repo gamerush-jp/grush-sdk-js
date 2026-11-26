@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.19.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.23.0/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -526,6 +526,7 @@ npx -p github:gamerush-jp/grush-sdk-js grush upload ./dist --game <ゲーム ID>
 | `grush whoami`（`status`） | 使うトークンの接続先・権限・期限 |
 | `grush logout` | 保存したトークンを消す |
 | `grush agents [フォルダ]` | AI エージェント向けの文書をプロジェクトへ入れる（下の「AI エージェント向けの文書」） |
+| `grush update [フォルダ] [--yes] [--to vX.Y.Z] [--dry-run]` | プロジェクトの GameRush SDK を最新のリリースへ上げる（下の「SDK を上げる」） |
 
 - ログインで求める権限は Unity の Editor 拡張と同じ（`games:read`・`games:create`・`builds:write`・`leaderboards:read`・`leaderboards:write`）。トークンの期限は 90 日で、切れたら `grush login` し直す
 - トークンは `%APPDATA%\GameRush\cli-token.json` / `~/Library/Application Support/GameRush/cli-token.json` / `$XDG_CONFIG_HOME/gamerush/cli-token.json`（無ければ `~/.config/gamerush/`）に、本人だけが読める権限で置く。本人だけに絞れないときは保存しない
@@ -536,6 +537,28 @@ npx -p github:gamerush-jp/grush-sdk-js grush upload ./dist --game <ゲーム ID>
 - 一番上の `grush.json` はビルドと一緒に上がり、ランキングの定義として反映される（書式は SDK ガイドのランキング）
 - Unity と Godot のビルドを GameRush のプレイヤーで起動させるには、Unity の Editor 拡張か Studio から上げる。CLI は `index.html` をそのまま使う
 - 公開の設定と審査の申請は Studio で行う
+- `grush upload`・`grush agents`・`grush whoami`・`grush update` は、grush と使っている SDK が最新のリリースより古ければ、標準エラー出力に 1 行のお知らせを出す（コマンドは止めない）。SDK の版は、`upload` ではビルドの JavaScript に残る SDK の注記から、`agents` ではプロジェクトから読む。Unity と Godot の書き出しには SDK の版が残らないので、ビルドでは見ない。調べた最新の版はトークンと同じフォルダの `version-check.json` に 24 時間控え、調べられないときは何も出さない。環境変数 `GRUSH_NO_UPDATE_CHECK=1` で止められる
+
+## SDK を上げる
+
+```bash
+npx -p github:gamerush-jp/grush-sdk-js grush update
+```
+
+今のフォルダ（引数で別のフォルダも指せる）から GameRush の SDK を探し、同じ SDK のリポジトリの最新のリリース（`--to vX.Y.Z` でほかの版）へ上げる。書き換える前に、ファイルごとに今の版と上げた後の版を並べて確認を求める。対話できないところでは、確かめた上で `--yes` を付ける。`--dry-run` は予定を出すだけで書き換えない。
+
+| SDK | 見つけ方 | 上げ方 |
+|---|---|---|
+| Unity | `Packages/manifest.json` の `cc.gamerush.sdk` が `https://github.com/gamerush-jp/grush-sdk-unity.git#vX.Y.Z` | URL のタグだけを書き換える（字下げと改行はそのまま）。Unity でプロジェクトを開くと Package Manager が新しい版を取り込む |
+| Godot | `addons/grush_sdk/plugin.cfg` の `version` | リリースの `addons/grush_sdk/`（と、プロジェクトにあれば `addons/grush_sdk_build/`）とフォルダごと入れ替える。Godot が作る `.uid` と `.import` は引き継ぐ |
+| JavaScript | 先頭に `GameRush SDK for JavaScript vX.Y.Z` の注記がある `grush-sdk.js` / `grush-sdk.mjs` と、同じフォルダの `grush-sdk.d.ts`（ほかの名前のファイルは、注記があってもバンドルとみなして入れ替えない）。`.html` / `.js` の jsDelivr の URL | ファイルをリリースのものと入れ替え、jsDelivr の URL の版を書き換える |
+
+- `node_modules/`、`.` で始まるフォルダ、Unity の `Library/` などの生成物、`build/`・`dist/`・`Build/` などの書き出し先は見ない
+- 書き換える前の中身はプロジェクトの `.grush-backup-…/` に退避する。途中で失敗したら書き換えたものを元に戻し、退避先を残す。Godot のアドオンの入れ替えで、新しい版に無いファイル（自分で足したファイルなど）は予定に並べ、入れ替えた後も退避先に残す
+- Unity でローカルのフォルダや `Packages/` の下に置いて入れている SDK、git のタグ以外で入れている SDK、シンボリックリンクの `addons/grush_sdk`、submodule などで入れた grush-sdk-js は書き換えず、上げ方を表示する
+- `.gamerush/` があれば、上げた SDK の版の文書で入れ直す
+- Unity・Godot・JavaScript の SDK は版の番号が別々なので、`--to` は SDK が 1 種類のプロジェクトでだけ使える
+- GitHub の API を認証なしで呼ぶ回数には制限がある。足りないときは環境変数 `GITHUB_TOKEN` を設定する
 
 ## AI エージェント向けの文書
 

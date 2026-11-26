@@ -13,7 +13,10 @@ import {
 import { login } from "./login.mjs";
 import { openBrowser as defaultOpenBrowser } from "./open-browser.mjs";
 import { BUILD_MANIFEST_PATH } from "./rules.mjs";
+import { updateCheckDisabled } from "./releases.mjs";
+import { updateProject } from "./update.mjs";
 import { collectBuild, formatBytes, isGameId, precheckBuild, uploadBuild } from "./upload.mjs";
+import { outdatedWarnings } from "./version-check.mjs";
 
 const API_TOKEN_PATTERN = /^grush_pat_[A-Za-z0-9_-]{43}$/;
 const API_TOKEN_PREFIX = "grush_pat_";
@@ -33,7 +36,12 @@ const API_TOKEN_PREFIX = "grush_pat_";
  *   loginTimeoutMs?: number,
  *   sleep?: (ms: number) => Promise<void>,
  *   now?: () => Date,
+ *   releaseFetch?: FetchLike,
  * }} CliDeps
+ *   releaseFetch は GitHub のリリースを読む fetch。無ければ版のお知らせを出さず、grush update も使えない。
+ *
+ * @typedef {(subject: import("./version-check.mjs").CheckSubject) => void} CheckUpdates
+ *   版のお知らせを調べ始める。結果はコマンドの後に stderr へ出す。
  */
 
 export function packageVersion() {
@@ -54,12 +62,18 @@ const HELP = `GameRush CLI（grush）
   grush agents [プロジェクトのフォルダ]
                                     AI エージェント向けの GameRush の文書を .gamerush/ に入れ、
                                     AGENTS.md（と、あれば CLAUDE.md）から指す（既定は今のフォルダ）
+  grush update [プロジェクトのフォルダ] [--yes] [--to vX.Y.Z] [--dry-run]
+                                    プロジェクトの GameRush SDK（Unity・Godot・JavaScript）を
+                                    最新のリリース（か --to の版）へ上げる（既定は今のフォルダ）
   grush help                        この説明
   grush --version                   版を表示する
 
 環境変数:
   GRUSH_TOKEN    保存したトークンの代わりに使う API トークン（grush_pat_…）。CI 向け
   GRUSH_ORIGIN   接続先（既定 ${PRODUCTION_ORIGIN}）
+  GRUSH_NO_UPDATE_CHECK=1
+                 grush と SDK の版のお知らせを出さない
+  GITHUB_TOKEN   GitHub のリリースを読むときに使うトークン（回数制限を避けるとき）
 `;
 
 /**
@@ -200,9 +214,10 @@ async function commandLogout(args, deps) {
   return 0;
 }
 
-/** @param {string[]} args @param {CliDeps} deps */
-async function commandWhoami(args, deps) {
+/** @param {string[]} args @param {CliDeps} deps @param {CheckUpdates} checkUpdates */
+async function commandWhoami(args, deps, checkUpdates) {
   const { options } = parseArgs(args, { origin: "value" });
+  checkUpdates({ kind: "none" });
   const envToken = deps.host.env.GRUSH_TOKEN;
   if (envToken) {
     deps.out("環境変数 GRUSH_TOKEN のトークンを使います。");
@@ -228,8 +243,8 @@ async function commandWhoami(args, deps) {
   return expired ? 1 : 0;
 }
 
-/** @param {string[]} args @param {CliDeps} deps */
-async function commandUpload(args, deps) {
+/** @param {string[]} args @param {CliDeps} deps @param {CheckUpdates} checkUpdates */
+async function commandUpload(args, deps, checkUpdates) {
   const { options, positionals } = parseArgs(args, {
     game: "value",
     new: "value",
@@ -256,6 +271,7 @@ async function commandUpload(args, deps) {
   const auth = resolveAuth(deps, options.origin);
 
   const { files, skipped } = collectBuild(positionals[0]);
+  checkUpdates({ kind: "build", files });
   if (skipped.length > 0) {
     deps.out(`プレイに要らないファイルを除きます（Studio と同じ）: ${skipped.join(", ")}`);
   }
@@ -308,8 +324,8 @@ async function commandUpload(args, deps) {
   return 0;
 }
 
-/** @param {string[]} args @param {CliDeps} deps */
-async function commandAgents(args, deps) {
+/** @param {string[]} args @param {CliDeps} deps @param {CheckUpdates} checkUpdates */
+async function commandAgents(args, deps, checkUpdates) {
   const { positionals } = parseArgs(args, {});
   if (positionals.length > 1) {
     throw new CliError("プロジェクトのフォルダは1つだけ指定してください（grush help を参照）。");
@@ -318,6 +334,7 @@ async function commandAgents(args, deps) {
   if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
     throw new CliError(`プロジェクトのフォルダがありません: ${projectDir}`);
   }
+  checkUpdates({ kind: "project", dir: projectDir });
   let result;
   try {
     result = installAgentDocs({ projectDir, stamp: `grush-sdk-js ${packageVersion()}` });
@@ -336,8 +353,67 @@ async function commandAgents(args, deps) {
     if (pointer.status === "skipped") continue;
     deps.out(`${pointer.file}: ${label[pointer.status]}`);
   }
-  deps.out("SDK を上げたら、もう一度 grush agents を実行してください。");
+  deps.out(
+    "SDK を上げたら、もう一度 grush agents を実行してください（grush update は .gamerush/ も入れ直します）。",
+  );
   return 0;
+}
+
+/** @param {string[]} args @param {CliDeps} deps @param {CheckUpdates} checkUpdates */
+async function commandUpdate(args, deps, checkUpdates) {
+  const { options, positionals } = parseArgs(args, { yes: "flag", to: "value", "dry-run": "flag" });
+  if (positionals.length > 1) {
+    throw new CliError("プロジェクトのフォルダは1つだけ指定してください（grush help を参照）。");
+  }
+  if (!deps.releaseFetch) throw new CliError("この環境では GitHub のリリースを読めません。");
+  checkUpdates({ kind: "none" });
+  return updateProject({
+    projectDir: positionals[0] ?? ".",
+    to: typeof options.to === "string" ? options.to : undefined,
+    yes: options.yes === true,
+    dryRun: options["dry-run"] === true,
+    deps: {
+      fetch: deps.releaseFetch,
+      host: deps.host,
+      out: deps.out,
+      err: deps.err,
+      confirm: deps.confirm,
+      isInteractive: deps.isInteractive,
+      now: () => deps.now?.() ?? new Date(),
+    },
+  });
+}
+
+/**
+ * 版のお知らせを、コマンドと並んで調べる。お知らせは補助なので、どんな失敗もコマンドに響かせない。
+ * @param {CliDeps} deps
+ * @param {string} command
+ * @returns {{ checkUpdates: CheckUpdates, flush: () => Promise<void> }}
+ */
+function updateChecker(deps, command) {
+  /** @type {Promise<string[]>[]} */
+  const pending = [];
+  const { releaseFetch } = deps;
+  const enabled = releaseFetch !== undefined && deps.host && !updateCheckDisabled(deps.host.env);
+  return {
+    checkUpdates: (subject) => {
+      if (!enabled || !releaseFetch) return;
+      pending.push(
+        (async () =>
+          outdatedWarnings({
+            fetch: releaseFetch,
+            host: deps.host,
+            now: deps.now?.() ?? new Date(),
+            cliVersion: packageVersion(),
+            command,
+            subject,
+          }))().catch(() => []),
+      );
+    },
+    flush: async () => {
+      for (const lines of await Promise.all(pending)) for (const line of lines) deps.err(line);
+    },
+  };
 }
 
 /**
@@ -347,6 +423,7 @@ async function commandAgents(args, deps) {
  */
 export async function run(argv, deps) {
   const [command, ...rest] = argv;
+  const { checkUpdates, flush } = updateChecker(deps, command ?? "");
   try {
     switch (command) {
       case undefined:
@@ -366,11 +443,13 @@ export async function run(argv, deps) {
         return await commandLogout(rest, deps);
       case "whoami":
       case "status":
-        return await commandWhoami(rest, deps);
+        return await commandWhoami(rest, deps, checkUpdates);
       case "upload":
-        return await commandUpload(rest, deps);
+        return await commandUpload(rest, deps, checkUpdates);
       case "agents":
-        return await commandAgents(rest, deps);
+        return await commandAgents(rest, deps, checkUpdates);
+      case "update":
+        return await commandUpdate(rest, deps, checkUpdates);
       default:
         deps.err(`知らないコマンドです: ${command}`);
         deps.out(HELP);
@@ -382,6 +461,8 @@ export async function run(argv, deps) {
       return 1;
     }
     throw error;
+  } finally {
+    await flush();
   }
 }
 
@@ -393,6 +474,7 @@ export function defaultDeps() {
     out: (line) => process.stdout.write(`${line}\n`),
     err: (line) => process.stderr.write(`${line}\n`),
     openBrowser: defaultOpenBrowser,
+    releaseFetch: (input, init) => fetch(input, init),
     isInteractive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     confirm: async (question) => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
