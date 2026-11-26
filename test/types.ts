@@ -6,6 +6,7 @@ import GRush, {
   type GRushRoomTopology,
   type GRushShopDuplicatePolicy,
   type GRushShopItemType,
+  type GRushShopOwnedGrant,
   type JsonValue,
 } from "../grush-sdk";
 
@@ -194,7 +195,10 @@ async function useSdk(): Promise<void> {
   if (grants.ok) await GRush.shop.ack(grants.value.map((grant) => grant.id));
   const owned = await GRush.shop.owned();
   const ackedAll: boolean = owned.ok && owned.value.every((grant) => grant.acked);
-  const counts: number[] = owned.ok ? owned.value.map((grant) => grant.count) : [];
+  const counts: number[] = owned.ok ? owned.value.map((grant) => grant.count ?? 1) : [];
+  // An owned grant written by hand without count (as before lotteries) still type-checks.
+  const handMade: GRushShopOwnedGrant = { id: "g1", sku: "sword", createdAt: "c", acked: true };
+  void handMade;
   void counts;
   if (bought.ok && bought.value.status === "purchased") {
     const granted: string | undefined = bought.value.sku;
@@ -237,8 +241,10 @@ async function useSdk(): Promise<void> {
       fallbackSku: "potion",
     },
   ];
-  // @ts-expect-error a lottery needs its odds.
-  local.mock.config.shopProducts = [{ sku: "box", name: "Box", priceJpy: 120, type: "lottery" }];
+  // A type this SDK does not know still type-checks, as before lotteries; the mock leaves the product out.
+  local.mock.config.shopProducts = [
+    { sku: "next", name: "Next", priceJpy: 120, type: "subscription" },
+  ];
   local.mock.config.shopLotteryDraw = "sword";
   local.mock.config.shopLotteryDraw = null;
   local.mock.config.shopPurchaseStatus = "cancelled";

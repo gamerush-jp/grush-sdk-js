@@ -312,35 +312,27 @@ export type GRushShopProduct = {
   fallback?: GRushShopItemRef | null;
 };
 
-/** モックに置く買い切りか消費の商品。価格は GameRush で付けられる価格（`GRushShopPriceJpy`）から選ぶ。 */
-export type GRushMockShopItem = {
-  sku: string;
-  name: string;
-  priceJpy: GRushShopPriceJpy;
-  /** 省くと `"permanent"`。 */
-  type?: "permanent" | "consumable";
-};
-
 /**
- * モックに置く抽選の商品。中身は同じ `shopProducts` の買い切りか消費の商品で、GameRush の Studio で登録するときと同じ形で
- * 書く。
+ * モックに置く商品。価格は GameRush で付けられる価格（`GRushShopPriceJpy`）から選ぶ。`type` を省くと `"permanent"` で、
+ * `"permanent"`・`"consumable"`・`"lottery"` のほかの値の商品はモックが外す。
+ * 抽選（`type` が `"lottery"`）は、GameRush の Studio で登録するときと同じ形で `odds`・`duplicatePolicy`・`fallbackSku` を書く。
+ * 中身と `fallbackSku` は同じ `shopProducts` の商品。
  */
-export type GRushMockShopLottery = {
+export type GRushMockShopProduct = {
   sku: string;
   name: string;
   priceJpy: GRushShopPriceJpy;
-  type: "lottery";
+  type?: GRushShopItemType;
   /**
-   * 中身と確率。2〜30 件の別々の sku で、`weightBp` は 1 以上の整数のベーシスポイント（1 = 0.01%）、合計 10000。
+   * 抽選だけ。中身と確率。2〜30 件の別々の sku（同じ `shopProducts` の買い切りか消費の商品）で、`weightBp` は 1 以上の
+   * 整数のベーシスポイント（1 = 0.01%）、合計 10000。
    */
-  odds: { sku: string; weightBp: number }[];
-  duplicatePolicy: GRushShopDuplicatePolicy;
-  /** `duplicatePolicy` が `"fallback"` のときに代わりに渡す、同じ `shopProducts` の消費の商品の sku。`"stack"` では省く。 */
+  odds?: { sku: string; weightBp: number }[];
+  /** 抽選だけ。持っている買い切りのアイテムが当たったときの扱い。 */
+  duplicatePolicy?: GRushShopDuplicatePolicy;
+  /** 抽選だけ。`duplicatePolicy` が `"fallback"` のときに代わりに渡す、同じ `shopProducts` の消費の商品の sku。`"stack"` では省く。 */
   fallbackSku?: string | null;
 };
-
-/** モックに置く商品。価格は GameRush で付けられる価格（`GRushShopPriceJpy`）から選ぶ。 */
-export type GRushMockShopProduct = GRushMockShopItem | GRushMockShopLottery;
 
 export type GRushShopProducts = {
   /**
@@ -391,9 +383,10 @@ export type GRushShopOwnedGrant = GRushShopGrant & {
   acked: boolean;
   /**
    * 持っている数。抽選（`duplicatePolicy` が `"stack"`）で同じアイテムがまた当たると増える。`id`・`createdAt`・`acked` は
-   * そのアイテムの最初の付与のもの。数を返さない古い GameRush では 1。
+   * そのアイテムの最初の付与のもの。数を返さない古い GameRush では 1。`owned()` はいつも入れて返す。省略できるのは、
+   * この欄が無かった版の型で手で作った値（テストの値など）を壊さないため。
    */
-  count: number;
+  count?: number;
 };
 
 /** 決済から戻って付与が届いたときの合図。 */
