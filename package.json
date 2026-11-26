@@ -23,7 +23,8 @@
     "grush-sdk.mjs",
     "grush-sdk.d.ts",
     "bin/",
-    "cli/"
+    "cli/",
+    "agents/"
   ],
   "engines": {
     "node": ">=20"

@@ -525,6 +525,7 @@ npx -p github:gamerush-jp/grush-sdk-js grush upload ./dist --game <ゲーム ID>
 | `grush upload <フォルダ\|zip> --new <タイトル> [--yes]` | ゲームを `private` で作ってからビルドを上げる。作る前に、利用規約への同意と素材の権利の確認を聞く（CI など対話できないところでは、確認した上で `--yes` を付ける） |
 | `grush whoami`（`status`） | 使うトークンの接続先・権限・期限 |
 | `grush logout` | 保存したトークンを消す |
+| `grush agents [フォルダ]` | AI エージェント向けの文書をプロジェクトへ入れる（下の「AI エージェント向けの文書」） |
 
 - ログインで求める権限は Unity の Editor 拡張と同じ（`games:read`・`games:create`・`builds:write`・`leaderboards:read`・`leaderboards:write`）。トークンの期限は 90 日で、切れたら `grush login` し直す
 - トークンは `%APPDATA%\GameRush\cli-token.json` / `~/Library/Application Support/GameRush/cli-token.json` / `$XDG_CONFIG_HOME/gamerush/cli-token.json`（無ければ `~/.config/gamerush/`）に、本人だけが読める権限で置く。本人だけに絞れないときは保存しない
@@ -535,6 +536,18 @@ npx -p github:gamerush-jp/grush-sdk-js grush upload ./dist --game <ゲーム ID>
 - 一番上の `grush.json` はビルドと一緒に上がり、ランキングの定義として反映される（書式は SDK ガイドのランキング）
 - Unity と Godot のビルドを GameRush のプレイヤーで起動させるには、Unity の Editor 拡張か Studio から上げる。CLI は `index.html` をそのまま使う
 - 公開の設定と審査の申請は Studio で行う
+
+## AI エージェント向けの文書
+
+`agents/` に、AI エージェント（Claude Code・Codex など）が読むための GameRush の文書を同梱している。中身は [開発者向けページ](https://gamerush.jp/developers) と同じで、守ることと文書の地図を `agents/AGENTS.md` にまとめてある。
+
+```bash
+npx -p github:gamerush-jp/grush-sdk-js grush agents
+```
+
+- 今のフォルダ（引数で別のフォルダも指せる）の `.gamerush/` へ文書を写す。`.gamerush/AGENTS.md` には SDK の版が入る。前の版の `.gamerush/docs/` は消して入れ直す
+- プロジェクトの `AGENTS.md`（無ければ作る）と、あれば `CLAUDE.md` に、`.gamerush/AGENTS.md` を指す段を `<!-- gamerush-agents:begin -->` と `<!-- gamerush-agents:end -->` で囲んで足す。もう一度実行すると、その段だけを書き換える
+- SDK を上げたら、もう一度実行する
 
 ## サンプル
 

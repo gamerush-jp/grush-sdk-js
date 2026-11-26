@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { createInterface } from "node:readline/promises";
+import { installAgentDocs } from "./agents.mjs";
 import { CliError, PRODUCTION_ORIGIN, canonicalOrigin } from "./api.mjs";
 import {
   clearCredentials,
@@ -50,6 +51,9 @@ const HELP = `GameRush CLI（grush）
                                     既存のゲームへビルドを上げる
   grush upload <フォルダ|zip> --new <タイトル> [--yes] [--origin URL]
                                     ゲームを private で作ってからビルドを上げる
+  grush agents [プロジェクトのフォルダ]
+                                    AI エージェント向けの GameRush の文書を .gamerush/ に入れ、
+                                    AGENTS.md（と、あれば CLAUDE.md）から指す（既定は今のフォルダ）
   grush help                        この説明
   grush --version                   版を表示する
 
@@ -304,6 +308,38 @@ async function commandUpload(args, deps) {
   return 0;
 }
 
+/** @param {string[]} args @param {CliDeps} deps */
+async function commandAgents(args, deps) {
+  const { positionals } = parseArgs(args, {});
+  if (positionals.length > 1) {
+    throw new CliError("プロジェクトのフォルダは1つだけ指定してください（grush help を参照）。");
+  }
+  const projectDir = positionals[0] ?? ".";
+  if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
+    throw new CliError(`プロジェクトのフォルダがありません: ${projectDir}`);
+  }
+  let result;
+  try {
+    result = installAgentDocs({ projectDir, stamp: `grush-sdk-js ${packageVersion()}` });
+  } catch (error) {
+    throw new CliError(error instanceof Error ? error.message : String(error));
+  }
+  deps.out(
+    `AI エージェント向けの文書を入れました: ${result.dir}（${result.files.length} ファイル）`,
+  );
+  const label = {
+    created: "作りました",
+    updated: "GameRush の段を足しました",
+    unchanged: "変更なし",
+  };
+  for (const pointer of result.pointers) {
+    if (pointer.status === "skipped") continue;
+    deps.out(`${pointer.file}: ${label[pointer.status]}`);
+  }
+  deps.out("SDK を上げたら、もう一度 grush agents を実行してください。");
+  return 0;
+}
+
 /**
  * @param {string[]} argv コマンド名より後ろの引数
  * @param {CliDeps} deps
@@ -333,6 +369,8 @@ export async function run(argv, deps) {
         return await commandWhoami(rest, deps);
       case "upload":
         return await commandUpload(rest, deps);
+      case "agents":
+        return await commandAgents(rest, deps);
       default:
         deps.err(`知らないコマンドです: ${command}`);
         deps.out(HELP);
