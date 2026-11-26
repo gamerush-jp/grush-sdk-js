@@ -51,7 +51,36 @@ CDN から読むときは版を固定すること（`@main` だと、アップ�
 </script>
 ```
 
-TypeScript の型は `grush-sdk.d.ts`。
+### TypeScript
+
+型（`grush-sdk.d.ts`）が入っているので、別のパッケージは要らない。npm には出していないので、GitHub から版を固定して入れる。
+
+```bash
+npm install github:gamerush-jp/grush-sdk-js#v0.23.0
+```
+
+```ts
+import GRush, { type GRushCode } from "grush-sdk-js";
+
+const result = await GRush.leaderboards.submit("score", 1200);
+if (result.ok) {
+  console.log("rank", result.value.rank); // number | null
+} else {
+  const code: GRushCode = result.code; // "rateLimited" など
+  console.log("not sent", code);
+}
+```
+
+Vite などのバンドラ（Phaser のテンプレートなど）でビルドすると、SDK はゲームのビルドに含まれる。結果は `ok` を確かめると `value` か `code` の型に絞り込まれる。`GRushResult`・`GRushCode` など、型の名前も import できる。
+
+script タグで CDN から読むときは、同じ版を `npm install -D` で開発用に入れ、型の参照を 1 行書くと `window.GRush` に型が付く。
+
+```ts
+/// <reference types="grush-sdk-js" />
+
+const self = await window.GRush.player.getSelf();
+if (self.ok) console.log(self.value.pseudoId);
+```
 
 ## API
 
