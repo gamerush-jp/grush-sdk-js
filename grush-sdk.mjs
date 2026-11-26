@@ -1,4 +1,4 @@
-/*! GameRush SDK for JavaScript v0.22.0
+/*! GameRush SDK for JavaScript v0.23.0
  * Docs: https://gamerush.jp/sdk
  * Source: https://github.com/gamerush-jp/grush-sdk-js
  * Issues: https://github.com/gamerush-jp/grush-sdk-js/issues
@@ -867,14 +867,81 @@ function invalid(message) {
   return failure(CODES.invalidParams, message);
 }
 var SHOP_PRICES_JPY = Object.freeze([100, 120, 300, 500, 1e3, 2e3, 3e3, 5e3]);
-var ITEM_TYPES = ["permanent", "consumable"];
+var ITEM_TYPES = ["permanent", "consumable", "lottery"];
+var LOTTERY_BP_TOTAL = 1e4;
+var LOTTERY_MIN_ENTRIES = 2;
+var LOTTERY_MAX_ENTRIES = 30;
+function isProduct(product) {
+  return product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && SHOP_PRICES_JPY.includes(product.priceJpy) && (product.type === void 0 || ITEM_TYPES.includes(product.type));
+}
+function oddsOf(odds, items) {
+  if (!Array.isArray(odds) || odds.length < LOTTERY_MIN_ENTRIES) return null;
+  if (odds.length > LOTTERY_MAX_ENTRIES) return null;
+  const seen = /* @__PURE__ */ new Set();
+  let total = 0;
+  for (const entry of odds) {
+    if (!entry || typeof entry !== "object" || seen.has(entry.sku)) return null;
+    if (!Number.isInteger(entry.weightBp) || entry.weightBp < 1) return null;
+    if (!items.some((item) => item.sku === entry.sku && item.type !== "lottery")) return null;
+    seen.add(entry.sku);
+    total += entry.weightBp;
+  }
+  return total === LOTTERY_BP_TOTAL ? odds.map(({ sku, weightBp }) => ({ sku, weightBp })) : null;
+}
+function lotteryOf(product, items) {
+  const odds = oddsOf(product.odds, items);
+  if (!odds) return null;
+  if (product.duplicatePolicy === "stack") {
+    if (product.fallbackSku !== void 0 && product.fallbackSku !== null) return null;
+    return { odds, duplicatePolicy: "stack", fallbackSku: null };
+  }
+  if (product.duplicatePolicy !== "fallback") return null;
+  const fallback = items.find((item) => item.sku === product.fallbackSku);
+  if (fallback?.type !== "consumable") return null;
+  return { odds, duplicatePolicy: "fallback", fallbackSku: fallback.sku };
+}
 function productsOf(config) {
   const list = Array.isArray(config.shopProducts) ? config.shopProducts : [];
-  return list.filter(
-    (product) => product && typeof product === "object" && typeof product.sku === "string" && SKU.test(product.sku) && typeof product.name === "string" && product.name && SHOP_PRICES_JPY.includes(product.priceJpy) && (product.type === void 0 || ITEM_TYPES.includes(product.type))
-  ).map(({ sku, name, priceJpy, type = "permanent" }) => ({ sku, name, priceJpy, type }));
+  const items = [];
+  for (const product of list) {
+    if (!isProduct(product) || items.some((item) => item.sku === product.sku)) continue;
+    const { sku, name, priceJpy, type = "permanent" } = product;
+    items.push({ sku, name, priceJpy, type, source: product });
+  }
+  const products = [];
+  for (const { source, ...item } of items) {
+    if (item.type !== "lottery") {
+      products.push(item);
+      continue;
+    }
+    const lottery = lotteryOf(source, items);
+    if (lottery) products.push({ ...item, lottery });
+  }
+  return products;
 }
-function createMockShop({ config, now = () => Date.now() }) {
+function productView({ lottery, ...product }, products) {
+  if (!lottery) return product;
+  const nameOf = (sku) => products.find((item) => item.sku === sku)?.name ?? sku;
+  return {
+    ...product,
+    odds: lottery.odds.map(({ sku, weightBp }) => ({
+      sku,
+      name: nameOf(sku),
+      percent: weightBp / 100
+    })),
+    duplicatePolicy: lottery.duplicatePolicy,
+    fallback: lottery.fallbackSku === null ? null : { sku: lottery.fallbackSku, name: nameOf(lottery.fallbackSku) }
+  };
+}
+function drawLottery(odds, random) {
+  let rest = Math.floor(random * LOTTERY_BP_TOTAL);
+  for (const entry of odds) {
+    if (rest < entry.weightBp) return entry.sku;
+    rest -= entry.weightBp;
+  }
+  return odds[odds.length - 1].sku;
+}
+function createMockShop({ config, now = () => Date.now(), random = () => Math.random() }) {
   let grants = [];
   const signals = [];
   let handler = null;
@@ -882,6 +949,7 @@ function createMockShop({ config, now = () => Date.now() }) {
   let scheduled = false;
   const enabled = () => config.shopEnabled !== false;
   const grantWire = ({ id, sku, createdAt }) => ({ id, sku, createdAt });
+  const owns = (sku) => grants.some((grant) => grant.sku === sku);
   function deliver() {
     scheduled = false;
     while (handler && signals.length > 0) {
@@ -899,29 +967,43 @@ function createMockShop({ config, now = () => Date.now() }) {
   }
   function products() {
     if (!enabled()) return ok({ enabled: false, products: [] });
-    return ok({ enabled: true, products: productsOf(config) });
+    const list = productsOf(config);
+    return ok({ enabled: true, products: list.map((product) => productView(product, list)) });
+  }
+  function grantFor(product, list) {
+    if (!product.lottery) return { sku: product.sku, consumable: product.type === "consumable" };
+    const { odds, duplicatePolicy, fallbackSku } = product.lottery;
+    const forced = odds.find((entry) => entry.sku === config.shopLotteryDraw);
+    const drawnSku = forced ? forced.sku : drawLottery(odds, random());
+    const consumable = list.find((item) => item.sku === drawnSku)?.type === "consumable";
+    const fallback = !consumable && duplicatePolicy === "fallback" && owns(drawnSku);
+    if (fallback) return { sku: fallbackSku, consumable: true, drawnSku, fallback };
+    return { sku: drawnSku, consumable, drawnSku, fallback };
   }
   function purchase({ sku }) {
     if (typeof sku !== "string" || !SKU.test(sku)) return invalid("Invalid sku.");
     if (!enabled()) return failure(CODES.unsupported, "Nothing can be bought here.");
     if (!config.signedIn) return failure(CODES.signInRequired, "Purchases require sign-in.");
-    const product = productsOf(config).find((item) => item.sku === sku);
+    const list = productsOf(config);
+    const product = list.find((item) => item.sku === sku);
     if (!product) return invalid("No product for that sku.");
-    const consumable = product.type === "consumable";
-    if (!consumable && grants.some((grant) => grant.sku === sku)) {
-      return ok({ status: "alreadyOwned" });
-    }
+    if (product.type === "permanent" && owns(sku)) return ok({ status: "alreadyOwned" });
     const status = config.shopPurchaseStatus;
     if (status === "cancelled" || status === "pending") return ok({ status });
+    const granted = grantFor(product, list);
     grants.push({
       id: uuid(),
-      sku,
+      sku: granted.sku,
       createdAt: new Date(now()).toISOString(),
       acked: false,
-      consumable
+      consumable: granted.consumable
     });
-    if (status === "purchased") return ok({ status });
-    signals.push({ sku });
+    if (status === "purchased") {
+      const result = { status, sku: granted.sku };
+      if (granted.drawnSku === void 0) return ok(result);
+      return ok({ ...result, drawnSku: granted.drawnSku, fallback: granted.fallback });
+    }
+    signals.push({ sku: granted.sku });
     schedule();
     return ok({ status: "redirecting" });
   }
@@ -945,9 +1027,16 @@ function createMockShop({ config, now = () => Date.now() }) {
     }
     return ok(acked);
   }
-  const owned = () => ok(
-    grants.filter((grant) => !grant.consumable).map((grant) => ({ ...grantWire(grant), acked: grant.acked }))
-  );
+  function owned() {
+    const bySku = /* @__PURE__ */ new Map();
+    for (const grant of grants) {
+      if (grant.consumable) continue;
+      const seen = bySku.get(grant.sku);
+      if (seen) seen.count += 1;
+      else bySku.set(grant.sku, { ...grantWire(grant), acked: grant.acked, count: 1 });
+    }
+    return ok([...bySku.values()]);
+  }
   function onPending(next) {
     const own = {};
     handler = next;
@@ -1376,7 +1465,7 @@ function createMockSocial({ config, selfId, isKnownPlayer, now = () => Date.now(
 // src/backend-mock.js
 var MANIFEST_TIMEOUT_MS = 3e3;
 var MOCK_ANALYTICS_MAX_EVENTS = 200;
-var MOCK_PROTOCOL_VERSION = 13;
+var MOCK_PROTOCOL_VERSION = 15;
 var INVITE_MAX_RECIPIENTS = 30;
 var INVITE_MODE_PATTERN = /^[A-Za-z0-9._:-]{1,32}$/;
 var INVITE_ROOM_CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
@@ -1471,7 +1560,8 @@ function defaultMockConfig() {
     inviteCount: 1,
     shopEnabled: true,
     shopProducts: [],
-    shopPurchaseStatus: "redirecting"
+    shopPurchaseStatus: "redirecting",
+    shopLotteryDraw: null
   };
 }
 var memoryStore = null;
@@ -2352,11 +2442,37 @@ function inviteResultOf(raw) {
 }
 function shopProductOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
-  return {
+  const product = {
     sku: raw.sku,
     name: text(raw.name),
     priceJpy: number(raw.priceJpy),
     type: text(raw.type) || "permanent"
+  };
+  return product.type === "lottery" ? shopLotteryOf(raw, product) : product;
+}
+function shopLotteryOf(raw, product) {
+  if (!Array.isArray(raw.odds)) return null;
+  const odds = [];
+  for (const entry of raw.odds) {
+    if (!entry || typeof entry !== "object" || typeof entry.sku !== "string" || !entry.sku) {
+      return null;
+    }
+    if (typeof entry.percent !== "number") return null;
+    odds.push({ sku: entry.sku, name: text(entry.name), percent: entry.percent });
+  }
+  if (odds.length === 0) return null;
+  if (raw.duplicatePolicy === "stack") {
+    return { ...product, odds, duplicatePolicy: "stack", fallback: null };
+  }
+  const fallback = raw.fallback;
+  if (raw.duplicatePolicy !== "fallback" || !fallback || typeof fallback.sku !== "string")
+    return null;
+  if (!fallback.sku) return null;
+  return {
+    ...product,
+    odds,
+    duplicatePolicy: "fallback",
+    fallback: { sku: fallback.sku, name: text(fallback.name) }
   };
 }
 function shopProductsOf(raw) {
@@ -2369,7 +2485,14 @@ function shopProductsOf(raw) {
 }
 function shopPurchaseOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.status !== "string" || !raw.status) return null;
-  return { status: raw.status };
+  const result = { status: raw.status };
+  if (raw.status !== "purchased" || typeof raw.sku !== "string" || !raw.sku) return result;
+  result.sku = raw.sku;
+  if (typeof raw.drawnSku === "string" && raw.drawnSku && typeof raw.fallback === "boolean") {
+    result.drawnSku = raw.drawnSku;
+    result.fallback = raw.fallback;
+  }
+  return result;
 }
 function shopGrantOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id) return null;
@@ -2378,7 +2501,9 @@ function shopGrantOf(raw) {
 }
 function ownedShopGrantOf(raw) {
   const grant = shopGrantOf(raw);
-  return grant ? { ...grant, acked: raw.acked === true } : null;
+  if (!grant) return null;
+  const count = Number.isInteger(raw.count) && raw.count >= 1 ? raw.count : 1;
+  return { ...grant, acked: raw.acked === true, count };
 }
 function shopPendingEventOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
@@ -2554,7 +2679,7 @@ function createRoom(source, info, onClosed) {
 }
 
 // src/sdk.js
-var VERSION = "0.22.0";
+var VERSION = "0.23.0";
 var REQUIRED_PROTOCOL_VERSION = 1;
 var PLAYER_STATE_PROTOCOL_VERSION = 2;
 var SHARE_PROTOCOL_VERSION = 3;
@@ -2570,6 +2695,7 @@ var PLAYER_STATE_PREVIEW_PROTOCOL_VERSION = 10;
 var ROOM_CONFIG_PROTOCOL_VERSION = 11;
 var SHOP_PROTOCOL_VERSION = 12;
 var INVITE_PROTOCOL_VERSION = 13;
+var SHOP_LOTTERY_PROTOCOL_VERSION = 15;
 var SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 var SHOP_ACK_MAX_IDS = 100;
 var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2770,8 +2896,13 @@ function createGRush(options = {}) {
     const active = backend();
     return active.isAvailable() && active.protocolVersion() >= SHOP_PROTOCOL_VERSION;
   }
+  function shopCatalogOf(raw) {
+    const catalog = shopProductsOf(raw);
+    if (!catalog || backend().protocolVersion() >= SHOP_LOTTERY_PROTOCOL_VERSION) return catalog;
+    return { ...catalog, products: catalog.products.filter((item) => item.type !== "lottery") };
+  }
   const shop = {
-    products: () => mapped("shop.products", void 0, required(shopProductsOf), SHOP_PROTOCOL_VERSION),
+    products: () => mapped("shop.products", void 0, required(shopCatalogOf), SHOP_PROTOCOL_VERSION),
     purchase(sku) {
       if (!shopSupported()) return Promise.resolve(unsupported());
       if (typeof sku !== "string" || !SHOP_SKU_PATTERN.test(sku)) {

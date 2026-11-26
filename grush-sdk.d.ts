@@ -259,10 +259,32 @@ export type GRushTradePage = {
 /**
  * 商品の種類。`permanent`: 買い切り。同じプレイヤーは、返金されない限り 1 回だけ買え、`owned` に入る。
  * `consumable`: 消費。同じプレイヤーが何度でも買え、`owned` には入らない。
- * 消費のアイテムを、ゲーム内通貨（ほかのアイテムや機能と交換する対価）と抽選（偶然で中身が決まる仕組み）に使ってはならない。
+ * `lottery`: 抽選。同じプレイヤーが何度でも買え、買うたびに同じゲームの買い切りか消費のアイテムを 1 つ、確率（`odds`）に
+ * 従って渡す。抽選の商品そのものは `owned` に入らない。`protocolVersion` 15 以上の GameRush だけが返す。
+ * 消費のアイテムを、ゲーム内通貨（ほかのアイテムや機能と交換する対価）として使ってはならない。抽選の商品を作れるかは、
+ * GameRush の販売に関する取り決めに従う。
  * 知らない値が増えても読めるよう、文字列のまま渡す。
  */
-export type GRushShopItemType = "permanent" | "consumable" | (string & {});
+export type GRushShopItemType = "permanent" | "consumable" | "lottery" | (string & {});
+
+/** 抽選の中身の 1 件。 */
+export type GRushShopLotteryOdds = {
+  /** 当たるアイテムの sku（同じゲームの買い切りか消費のアイテム）。 */
+  sku: string;
+  /** 当たるアイテムの名前。 */
+  name: string;
+  /** 当たる確率（%）。小数第 2 位まで。1 つの抽選の合計は 100。 */
+  percent: number;
+};
+
+/**
+ * 抽選で、持っている買い切りのアイテムが当たったときの扱い。`fallback`: 代わりに `fallback` のアイテムを渡す。
+ * `stack`: 当たったアイテムをもう 1 つ渡し、`owned` の `count` が増える。
+ */
+export type GRushShopDuplicatePolicy = "fallback" | "stack";
+
+/** アイテムの sku と名前。 */
+export type GRushShopItemRef = { sku: string; name: string };
 
 /**
  * GameRush で作者が商品に付けられる価格（税込みの円）。Studio の価格の選択肢と同じ。
@@ -282,12 +304,43 @@ export type GRushShopProduct = {
    * モックの `shopProducts` では省けて、省くと `"permanent"`。
    */
   type?: GRushShopItemType;
+  /** 抽選（`type` が `"lottery"`）だけが持つ、中身と確率。 */
+  odds?: GRushShopLotteryOdds[];
+  /** 抽選だけが持つ、持っている買い切りのアイテムが当たったときの扱い。 */
+  duplicatePolicy?: GRushShopDuplicatePolicy;
+  /** 抽選だけが持つ。`duplicatePolicy` が `"fallback"` のときに代わりに渡すアイテム（消費のアイテム）。`"stack"` では `null`。 */
+  fallback?: GRushShopItemRef | null;
+};
+
+/** モックに置く買い切りか消費の商品。価格は GameRush で付けられる価格（`GRushShopPriceJpy`）から選ぶ。 */
+export type GRushMockShopItem = {
+  sku: string;
+  name: string;
+  priceJpy: GRushShopPriceJpy;
+  /** 省くと `"permanent"`。 */
+  type?: "permanent" | "consumable";
+};
+
+/**
+ * モックに置く抽選の商品。中身は同じ `shopProducts` の買い切りか消費の商品で、GameRush の Studio で登録するときと同じ形で
+ * 書く。
+ */
+export type GRushMockShopLottery = {
+  sku: string;
+  name: string;
+  priceJpy: GRushShopPriceJpy;
+  type: "lottery";
+  /**
+   * 中身と確率。2〜30 件の別々の sku で、`weightBp` は 1 以上の整数のベーシスポイント（1 = 0.01%）、合計 10000。
+   */
+  odds: { sku: string; weightBp: number }[];
+  duplicatePolicy: GRushShopDuplicatePolicy;
+  /** `duplicatePolicy` が `"fallback"` のときに代わりに渡す、同じ `shopProducts` の消費の商品の sku。`"stack"` では省く。 */
+  fallbackSku?: string | null;
 };
 
 /** モックに置く商品。価格は GameRush で付けられる価格（`GRushShopPriceJpy`）から選ぶ。 */
-export type GRushMockShopProduct = Omit<GRushShopProduct, "priceJpy"> & {
-  priceJpy: GRushShopPriceJpy;
-};
+export type GRushMockShopProduct = GRushMockShopItem | GRushMockShopLottery;
 
 export type GRushShopProducts = {
   /**
@@ -312,7 +365,18 @@ export type GRushShopPurchaseStatus =
   | "alreadyOwned"
   | (string & {});
 
-export type GRushShopPurchaseResult = { status: GRushShopPurchaseStatus };
+export type GRushShopPurchaseResult = {
+  status: GRushShopPurchaseStatus;
+  /**
+   * 渡したアイテムの sku。`purchased` のときだけ、GameRush が付与を知らせたら載る（`protocolVersion` 15 以上）。
+   * 抽選では当たったアイテムか、かぶったときの代わりのアイテム。
+   */
+  sku?: string;
+  /** 抽選だけ。当たったアイテムの sku。 */
+  drawnSku?: string;
+  /** 抽選だけ。持っている買い切りのアイテムが当たり、代わり（商品の `fallback`）を渡したとき `true`。 */
+  fallback?: boolean;
+};
 
 /** 支払いで届いたアイテム。 */
 export type GRushShopGrant = {
@@ -325,6 +389,11 @@ export type GRushShopGrant = {
 export type GRushShopOwnedGrant = GRushShopGrant & {
   /** ゲームが `ack` 済みか。 */
   acked: boolean;
+  /**
+   * 持っている数。抽選（`duplicatePolicy` が `"stack"`）で同じアイテムがまた当たると増える。`id`・`createdAt`・`acked` は
+   * そのアイテムの最初の付与のもの。数を返さない古い GameRush では 1。
+   */
+  count: number;
 };
 
 /** 決済から戻って付与が届いたときの合図。 */
@@ -603,9 +672,15 @@ export type GRushMockConfig = {
   shopEnabled: boolean;
   /**
    * `shop.products` が返す商品。sku・名前がそろわないものと、価格が `GRush.SHOP_PRICES_JPY` のどれでもないものと、
-   * `type` が `"permanent"` でも `"consumable"` でもないものは外す。`type` を省くと `"permanent"`。既定は空。
+   * `type` が `"permanent"`・`"consumable"`・`"lottery"` のどれでもないものと、GameRush が受け付けない抽選は外す。
+   * `type` を省くと `"permanent"`。既定は空。
    */
   shopProducts: GRushMockShopProduct[];
+  /**
+   * 抽選で必ず当てるアイテムの sku。その抽選の中身に無い sku と `null` では、確率どおりに引く。かぶったときの扱いを
+   * 試すのに使う。既定 `null`。
+   */
+  shopLotteryDraw: string | null;
   /**
    * `shop.purchase` の答え。`"cancelled"` と `"pending"` にすると付与せずにその値を返す。`"purchased"` にすると、iOS の
    * アプリと同じく付与を `pending` に積んで `purchased` を返し、`onPending` は呼ばない。既定 `"redirecting"`。
@@ -827,7 +902,7 @@ export interface GRushSdk {
     products(): Promise<GRushResult<GRushShopProducts>>;
     /**
      * 商品を買う。買えるのは Web の GameRush と iOS のアプリで、Android のアプリと LINE では `unsupported`。
-     * 消費の商品は何度でも買え、`alreadyOwned` にならない。sku の形が違えば GameRush へ
+     * 消費と抽選の商品は何度でも買え、`alreadyOwned` にならない。sku の形が違えば GameRush へ
      * 送らずに `invalidParams`。ゲストは `signInRequired`。
      */
     purchase(sku: string): Promise<GRushResult<GRushShopPurchaseResult>>;
@@ -838,7 +913,10 @@ export interface GRushSdk {
      * `invalidParams`。
      */
     ack(ids: string[]): Promise<GRushResult<number>>;
-    /** このプレイヤーがこのゲームで受けた買い切りの付与のすべて。返金された付与と、消費のアイテムの付与は入らない。 */
+    /**
+     * このプレイヤーがこのゲームで持っている買い切りのアイテムを、アイテムごとに 1 件。返金された付与と、消費のアイテムの
+     * 付与は入らない。
+     */
     owned(): Promise<GRushResult<GRushShopOwnedGrant[]>>;
     /**
      * 決済から戻って付与が届いたときに `handler` を呼ぶ。返り値は解除関数。登録より先に届いていた合図は、

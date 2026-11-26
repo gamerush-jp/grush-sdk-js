@@ -4,6 +4,7 @@ import GRush, {
   type GRushMessage,
   type GRushRoom,
   type GRushRoomTopology,
+  type GRushShopDuplicatePolicy,
   type GRushShopItemType,
   type JsonValue,
 } from "../grush-sdk";
@@ -174,7 +175,17 @@ async function useSdk(): Promise<void> {
   const itemType: GRushShopItemType | undefined = shopProducts.ok
     ? shopProducts.value.products[0]?.type
     : undefined;
-  if (itemType === "consumable" || itemType === "permanent") void itemType;
+  if (itemType === "consumable" || itemType === "permanent" || itemType === "lottery")
+    void itemType;
+  const lottery = shopProducts.ok
+    ? shopProducts.value.products.find((p) => p.type === "lottery")
+    : undefined;
+  const percents: number[] = lottery?.odds?.map((entry) => entry.percent) ?? [];
+  const policy: GRushShopDuplicatePolicy | undefined = lottery?.duplicatePolicy;
+  const fallbackName: string | undefined = lottery?.fallback?.name;
+  void percents;
+  void policy;
+  void fallbackName;
   const bought = await GRush.shop.purchase("gem_pack.100");
   if (bought.ok && bought.value.status === "redirecting") void 0;
   if (bought.ok && (bought.value.status === "purchased" || bought.value.status === "pending"))
@@ -183,6 +194,16 @@ async function useSdk(): Promise<void> {
   if (grants.ok) await GRush.shop.ack(grants.value.map((grant) => grant.id));
   const owned = await GRush.shop.owned();
   const ackedAll: boolean = owned.ok && owned.value.every((grant) => grant.acked);
+  const counts: number[] = owned.ok ? owned.value.map((grant) => grant.count) : [];
+  void counts;
+  if (bought.ok && bought.value.status === "purchased") {
+    const granted: string | undefined = bought.value.sku;
+    const drawn: string | undefined = bought.value.drawnSku;
+    const substituted: boolean | undefined = bought.value.fallback;
+    void granted;
+    void drawn;
+    void substituted;
+  }
   void ackedAll;
   const stopShop: () => void = GRush.shop.onPending((event) => {
     const sku: string = event.sku;
@@ -200,6 +221,26 @@ async function useSdk(): Promise<void> {
   ];
   // @ts-expect-error the price must be one GameRush lets authors set.
   local.mock.config.shopProducts = [{ sku: "odd", name: "Odd", priceJpy: 480 }];
+  local.mock.config.shopProducts = [
+    { sku: "sword", name: "Sword", priceJpy: 300 },
+    { sku: "potion", name: "Potion", priceJpy: 120, type: "consumable" },
+    {
+      sku: "box",
+      name: "Box",
+      priceJpy: 120,
+      type: "lottery",
+      odds: [
+        { sku: "sword", weightBp: 1000 },
+        { sku: "potion", weightBp: 9000 },
+      ],
+      duplicatePolicy: "fallback",
+      fallbackSku: "potion",
+    },
+  ];
+  // @ts-expect-error a lottery needs its odds.
+  local.mock.config.shopProducts = [{ sku: "box", name: "Box", priceJpy: 120, type: "lottery" }];
+  local.mock.config.shopLotteryDraw = "sword";
+  local.mock.config.shopLotteryDraw = null;
   local.mock.config.shopPurchaseStatus = "cancelled";
   local.mock.config.shopPurchaseStatus = "purchased";
   local.mock.config.shopEnabled = false;

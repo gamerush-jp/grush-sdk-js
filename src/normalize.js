@@ -256,11 +256,40 @@ export function inviteResultOf(raw) {
 // SDK does not know yet is passed through as is, so a newer GameRush still reads.
 function shopProductOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.sku !== "string" || !raw.sku) return null;
-  return {
+  const product = {
     sku: raw.sku,
     name: text(raw.name),
     priceJpy: number(raw.priceJpy),
     type: text(raw.type) || "permanent",
+  };
+  return product.type === "lottery" ? shopLotteryOf(raw, product) : product;
+}
+
+// The runtime checks a lottery's odds before handing it over, and leaves out a lottery whose odds are broken.
+// A lottery without readable odds is left out here too: it is never sold without its odds.
+function shopLotteryOf(raw, product) {
+  if (!Array.isArray(raw.odds)) return null;
+  const odds = [];
+  for (const entry of raw.odds) {
+    if (!entry || typeof entry !== "object" || typeof entry.sku !== "string" || !entry.sku) {
+      return null;
+    }
+    if (typeof entry.percent !== "number") return null;
+    odds.push({ sku: entry.sku, name: text(entry.name), percent: entry.percent });
+  }
+  if (odds.length === 0) return null;
+  if (raw.duplicatePolicy === "stack") {
+    return { ...product, odds, duplicatePolicy: "stack", fallback: null };
+  }
+  const fallback = raw.fallback;
+  if (raw.duplicatePolicy !== "fallback" || !fallback || typeof fallback.sku !== "string")
+    return null;
+  if (!fallback.sku) return null;
+  return {
+    ...product,
+    odds,
+    duplicatePolicy: "fallback",
+    fallback: { sku: fallback.sku, name: text(fallback.name) },
   };
 }
 
@@ -274,10 +303,19 @@ export function shopProductsOf(raw) {
   };
 }
 
+// sku is the item granted, sent with "purchased" only when GameRush knows it. A lottery adds the item drawn
+// (drawnSku) and whether a substitute was granted because the player already owned it (fallback).
 export function shopPurchaseOf(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.status !== "string" || !raw.status) return null;
   // A status this SDK does not know yet is passed through as is, so a newer GameRush still reads.
-  return { status: raw.status };
+  const result = { status: raw.status };
+  if (raw.status !== "purchased" || typeof raw.sku !== "string" || !raw.sku) return result;
+  result.sku = raw.sku;
+  if (typeof raw.drawnSku === "string" && raw.drawnSku && typeof raw.fallback === "boolean") {
+    result.drawnSku = raw.drawnSku;
+    result.fallback = raw.fallback;
+  }
+  return result;
 }
 
 export function shopGrantOf(raw) {
@@ -286,9 +324,13 @@ export function shopGrantOf(raw) {
   return { id: raw.id, sku: raw.sku, createdAt: text(raw.createdAt) };
 }
 
+// count grows only when a lottery that stacks hands over an item the player already owns. A GameRush older
+// than protocol 15 sends no count, and the player owns one.
 export function ownedShopGrantOf(raw) {
   const grant = shopGrantOf(raw);
-  return grant ? { ...grant, acked: raw.acked === true } : null;
+  if (!grant) return null;
+  const count = Number.isInteger(raw.count) && raw.count >= 1 ? raw.count : 1;
+  return { ...grant, acked: raw.acked === true, count };
 }
 
 export function shopPendingEventOf(raw) {

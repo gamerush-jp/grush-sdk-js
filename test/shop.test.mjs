@@ -68,7 +68,7 @@ test("shop calls GRushShop from protocol 12 and reads its results", async () => 
   ]);
   assert.equal((await sdk.shop.ack([GRANT_ID])).value, 1);
   assert.deepEqual((await sdk.shop.owned()).value, [
-    { id: GRANT_ID, sku: "gem_pack", createdAt: "c", acked: true },
+    { id: GRANT_ID, sku: "gem_pack", createdAt: "c", acked: true, count: 1 },
   ]);
   assert.deepEqual(calls, [
     ["products"],
@@ -123,6 +123,142 @@ test("purchase passes through the statuses of the iOS app", async () => {
     installRuntime(12, { ...RESULTS, purchase: { status } });
     assert.deepEqual((await createGRush().shop.purchase("gem_pack")).value, { status });
   }
+});
+
+const ODDS = [
+  { sku: "sword", name: "Sword", percent: 12.5 },
+  { sku: "potion", name: "Potion", percent: 87.5 },
+];
+
+test("shop reads a lottery's odds from protocol 15", async () => {
+  installRuntime(15, {
+    products: {
+      enabled: true,
+      products: [
+        {
+          sku: "box",
+          name: "Box",
+          priceJpy: 120,
+          type: "lottery",
+          odds: ODDS.map((entry) => ({ ...entry, extra: 1 })),
+          duplicatePolicy: "fallback",
+          fallback: { sku: "potion", name: "Potion" },
+        },
+        {
+          sku: "box.stack",
+          name: "Stack",
+          priceJpy: 300,
+          type: "lottery",
+          odds: ODDS,
+          duplicatePolicy: "stack",
+          fallback: { sku: "potion", name: "Potion" },
+        },
+        { sku: "no_odds", name: "x", priceJpy: 120, type: "lottery", duplicatePolicy: "stack" },
+        { sku: "bad_odds", name: "x", priceJpy: 120, type: "lottery", odds: [{ sku: "a" }] },
+        {
+          sku: "no_fallback",
+          name: "x",
+          priceJpy: 120,
+          type: "lottery",
+          odds: ODDS,
+          duplicatePolicy: "fallback",
+          fallback: null,
+        },
+        { sku: "odd_policy", name: "x", priceJpy: 120, type: "lottery", odds: ODDS },
+      ],
+    },
+  });
+  const result = await createGRush().shop.products();
+  assert.deepEqual(result.value.products, [
+    {
+      sku: "box",
+      name: "Box",
+      priceJpy: 120,
+      type: "lottery",
+      odds: ODDS,
+      duplicatePolicy: "fallback",
+      fallback: { sku: "potion", name: "Potion" },
+    },
+    {
+      sku: "box.stack",
+      name: "Stack",
+      priceJpy: 300,
+      type: "lottery",
+      odds: ODDS,
+      duplicatePolicy: "stack",
+      fallback: null,
+    },
+  ]);
+});
+
+test("a lottery from a runtime older than protocol 15 is left out", async () => {
+  installRuntime(14, {
+    products: {
+      enabled: true,
+      products: [
+        { sku: "gem", name: "Gem", priceJpy: 120 },
+        {
+          sku: "box",
+          name: "Box",
+          priceJpy: 120,
+          type: "lottery",
+          odds: ODDS,
+          duplicatePolicy: "stack",
+        },
+      ],
+    },
+  });
+  const result = await createGRush().shop.products();
+  assert.deepEqual(
+    result.value.products.map((product) => product.sku),
+    ["gem"],
+  );
+});
+
+test("purchase reads the granted item and a lottery's draw", async () => {
+  const cases = [
+    [
+      { status: "purchased", sku: "gem" },
+      { status: "purchased", sku: "gem" },
+    ],
+    [
+      { status: "purchased", sku: "potion", drawnSku: "sword", fallback: true },
+      { status: "purchased", sku: "potion", drawnSku: "sword", fallback: true },
+    ],
+    // A draw without its fallback flag is half a draw, and only the granted item is kept.
+    [
+      { status: "purchased", sku: "sword", drawnSku: "sword" },
+      { status: "purchased", sku: "sword" },
+    ],
+    [{ status: "purchased", sku: "", drawnSku: "sword", fallback: false }, { status: "purchased" }],
+    // pending has not granted anything yet.
+    [{ status: "pending", sku: "gem" }, { status: "pending" }],
+  ];
+  for (const [raw, expected] of cases) {
+    installRuntime(15, { ...RESULTS, purchase: raw });
+    assert.deepEqual((await createGRush().shop.purchase("gem")).value, expected);
+  }
+});
+
+test("owned reads the count and fills 1 where GameRush sends none", async () => {
+  installRuntime(15, {
+    ...RESULTS,
+    owned: {
+      grants: [
+        { id: GRANT_ID, sku: "sword", createdAt: "c", acked: true, count: 3 },
+        { id: GRANT_ID, sku: "shield", createdAt: "c", acked: false, count: 0 },
+        { id: GRANT_ID, sku: "helm", createdAt: "c", acked: false, count: 1.5 },
+      ],
+    },
+  });
+  assert.deepEqual(
+    (await createGRush().shop.owned()).value.map((grant) => [grant.sku, grant.count]),
+    [
+      ["sword", 3],
+      ["shield", 1],
+      ["helm", 1],
+    ],
+  );
 });
 
 test("a closed shop lists no products", async () => {
@@ -356,7 +492,10 @@ test("the mock answers like the iOS app when asked to", async () => {
   assert.deepEqual((await sdk.shop.pending()).value, []);
 
   sdk.mock.config.shopPurchaseStatus = "purchased";
-  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, { status: "purchased" });
+  assert.deepEqual((await sdk.shop.purchase("potion.heal")).value, {
+    status: "purchased",
+    sku: "potion.heal",
+  });
   await flush();
   assert.deepEqual(signals, []);
   assert.deepEqual(
@@ -387,4 +526,225 @@ test("the prices an author can set are the GameRush price list", () => {
   const sdk = mockSdk();
   assert.deepEqual(sdk.SHOP_PRICES_JPY, [100, 120, 300, 500, 1000, 2000, 3000, 5000]);
   assert.ok(Object.isFrozen(sdk.SHOP_PRICES_JPY));
+});
+
+const LOTTERY_CONFIG = [
+  { sku: "sword", name: "Sword", priceJpy: 300 },
+  { sku: "potion", name: "Potion", priceJpy: 120, type: "consumable" },
+  {
+    sku: "box",
+    name: "Box",
+    priceJpy: 120,
+    type: "lottery",
+    odds: [
+      { sku: "sword", weightBp: 1250 },
+      { sku: "potion", weightBp: 8750 },
+    ],
+    duplicatePolicy: "fallback",
+    fallbackSku: "potion",
+  },
+  {
+    sku: "box.stack",
+    name: "Stack",
+    priceJpy: 300,
+    type: "lottery",
+    odds: [
+      { sku: "sword", weightBp: 5000 },
+      { sku: "potion", weightBp: 5000 },
+    ],
+    duplicatePolicy: "stack",
+  },
+];
+
+test("the mock lists a lottery with names and percentages, and leaves out one GameRush refuses", async () => {
+  const sdk = mockSdk();
+  const lottery = (fields) => ({
+    sku: "bad",
+    name: "Bad",
+    priceJpy: 120,
+    type: "lottery",
+    ...fields,
+  });
+  const odds = [
+    { sku: "sword", weightBp: 5000 },
+    { sku: "potion", weightBp: 5000 },
+  ];
+  sdk.mock.config.shopProducts = [
+    ...LOTTERY_CONFIG,
+    lottery({
+      sku: "bad.total",
+      odds: [
+        { sku: "sword", weightBp: 5000 },
+        { sku: "potion", weightBp: 4999 },
+      ],
+      duplicatePolicy: "stack",
+    }),
+    lottery({
+      sku: "bad.one",
+      odds: [{ sku: "sword", weightBp: 10000 }],
+      duplicatePolicy: "stack",
+    }),
+    lottery({
+      sku: "bad.twice",
+      odds: [
+        { sku: "sword", weightBp: 5000 },
+        { sku: "sword", weightBp: 5000 },
+      ],
+      duplicatePolicy: "stack",
+    }),
+    lottery({
+      sku: "bad.unknown",
+      odds: [
+        { sku: "sword", weightBp: 5000 },
+        { sku: "nope", weightBp: 5000 },
+      ],
+      duplicatePolicy: "stack",
+    }),
+    lottery({
+      sku: "bad.nested",
+      odds: [
+        { sku: "sword", weightBp: 5000 },
+        { sku: "box", weightBp: 5000 },
+      ],
+      duplicatePolicy: "stack",
+    }),
+    lottery({
+      sku: "bad.fraction",
+      odds: [
+        { sku: "sword", weightBp: 5000.5 },
+        { sku: "potion", weightBp: 4999.5 },
+      ],
+      duplicatePolicy: "stack",
+    }),
+    lottery({ sku: "bad.policy", odds, duplicatePolicy: "other" }),
+    lottery({ sku: "bad.fallback", odds, duplicatePolicy: "fallback", fallbackSku: "sword" }),
+    lottery({ sku: "bad.stack", odds, duplicatePolicy: "stack", fallbackSku: "potion" }),
+  ];
+  assert.deepEqual((await sdk.shop.products()).value.products, [
+    { sku: "sword", name: "Sword", priceJpy: 300, type: "permanent" },
+    { sku: "potion", name: "Potion", priceJpy: 120, type: "consumable" },
+    {
+      sku: "box",
+      name: "Box",
+      priceJpy: 120,
+      type: "lottery",
+      odds: [
+        { sku: "sword", name: "Sword", percent: 12.5 },
+        { sku: "potion", name: "Potion", percent: 87.5 },
+      ],
+      duplicatePolicy: "fallback",
+      fallback: { sku: "potion", name: "Potion" },
+    },
+    {
+      sku: "box.stack",
+      name: "Stack",
+      priceJpy: 300,
+      type: "lottery",
+      odds: [
+        { sku: "sword", name: "Sword", percent: 50 },
+        { sku: "potion", name: "Potion", percent: 50 },
+      ],
+      duplicatePolicy: "stack",
+      fallback: null,
+    },
+  ]);
+  assert.equal((await sdk.shop.purchase("bad.total")).code, "invalidParams");
+});
+
+test("the mock draws a lottery by its odds", async () => {
+  const sdk = mockSdk();
+  sdk.mock.config.shopProducts = LOTTERY_CONFIG;
+  sdk.mock.config.shopPurchaseStatus = "purchased";
+  const random = Math.random;
+  const draws = {};
+  try {
+    // 12.5% sword: the draws below 0.125 hit it.
+    for (let step = 0; step < 1000; step += 1) {
+      Math.random = () => step / 1000;
+      sdk.mock.reset();
+      sdk.mock.config.shopProducts = LOTTERY_CONFIG;
+      sdk.mock.config.shopPurchaseStatus = "purchased";
+      const { drawnSku } = (await sdk.shop.purchase("box")).value;
+      draws[drawnSku] = (draws[drawnSku] ?? 0) + 1;
+    }
+  } finally {
+    Math.random = random;
+  }
+  assert.deepEqual(draws, { sword: 125, potion: 875 });
+});
+
+test("the mock hands over the substitute when a fallback lottery draws an owned item", async () => {
+  const sdk = mockSdk();
+  sdk.mock.config.shopProducts = LOTTERY_CONFIG;
+  sdk.mock.config.shopPurchaseStatus = "purchased";
+  sdk.mock.config.shopLotteryDraw = "sword";
+  assert.deepEqual((await sdk.shop.purchase("box")).value, {
+    status: "purchased",
+    sku: "sword",
+    drawnSku: "sword",
+    fallback: false,
+  });
+  assert.deepEqual((await sdk.shop.purchase("box")).value, {
+    status: "purchased",
+    sku: "potion",
+    drawnSku: "sword",
+    fallback: true,
+  });
+  // A lottery is bought again and again; the permanent item drawn is still alreadyOwned on its own.
+  assert.deepEqual((await sdk.shop.purchase("sword")).value, { status: "alreadyOwned" });
+  assert.deepEqual(
+    (await sdk.shop.pending()).value.map((grant) => grant.sku),
+    ["sword", "potion"],
+  );
+  assert.deepEqual(
+    (await sdk.shop.owned()).value.map((grant) => [grant.sku, grant.count]),
+    [["sword", 1]],
+  );
+
+  sdk.mock.config.shopLotteryDraw = "potion";
+  assert.deepEqual((await sdk.shop.purchase("box")).value, {
+    status: "purchased",
+    sku: "potion",
+    drawnSku: "potion",
+    fallback: false,
+  });
+});
+
+test("the mock stacks an owned item a stack lottery draws, and owned counts it", async () => {
+  const sdk = mockSdk();
+  sdk.mock.config.shopProducts = LOTTERY_CONFIG;
+  sdk.mock.config.shopLotteryDraw = "sword";
+  const signals = [];
+  sdk.shop.onPending((event) => signals.push(event));
+  assert.deepEqual((await sdk.shop.purchase("box.stack")).value, { status: "redirecting" });
+  await flush();
+  assert.deepEqual(signals, [{ sku: "sword" }]);
+
+  sdk.mock.config.shopPurchaseStatus = "purchased";
+  assert.deepEqual((await sdk.shop.purchase("box.stack")).value, {
+    status: "purchased",
+    sku: "sword",
+    drawnSku: "sword",
+    fallback: false,
+  });
+  const pending = (await sdk.shop.pending()).value;
+  assert.deepEqual(
+    pending.map((grant) => grant.sku),
+    ["sword", "sword"],
+  );
+  await sdk.shop.ack([pending[1].id]);
+  const owned = (await sdk.shop.owned()).value;
+  assert.equal(owned.length, 1);
+  assert.deepEqual(owned[0], {
+    id: pending[0].id,
+    sku: "sword",
+    createdAt: pending[0].createdAt,
+    acked: false,
+    count: 2,
+  });
+
+  sdk.mock.config.shopPurchaseStatus = "pending";
+  assert.deepEqual((await sdk.shop.purchase("box.stack")).value, { status: "pending" });
+  sdk.mock.reset();
+  assert.equal(sdk.mock.config.shopLotteryDraw, null);
 });

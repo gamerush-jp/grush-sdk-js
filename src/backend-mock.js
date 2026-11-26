@@ -10,8 +10,9 @@ import { CODES, failure, ok } from "./result.js";
 const MANIFEST_TIMEOUT_MS = 3000;
 // How many analytics events mock.analyticsEvents() keeps, newest last.
 export const MOCK_ANALYTICS_MAX_EVENTS = 200;
-// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 12, invites need 13).
-const MOCK_PROTOCOL_VERSION = 13;
+// The newest protocol the mock implements (playerState.onPreview needs 10, shop needs 12, invites need 13,
+// lotteries in the shop need 15).
+const MOCK_PROTOCOL_VERSION = 15;
 // The most friends one invite sheet lets the player pick, as in GameRush.
 const INVITE_MAX_RECIPIENTS = 30;
 // The same rules GameRush applies to the mode and the room code of an invite.
@@ -128,6 +129,7 @@ export function defaultMockConfig() {
     shopEnabled: true,
     shopProducts: [],
     shopPurchaseStatus: "redirecting",
+    shopLotteryDraw: null,
   };
 }
 

@@ -30,7 +30,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.22.0";
+export const VERSION = "0.23.0";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
@@ -52,6 +52,9 @@ const ROOM_CONFIG_PROTOCOL_VERSION = 11;
 const SHOP_PROTOCOL_VERSION = 12;
 // net.invite and the invite of launch. Older runtimes have no invite sheet and never pass an invite.
 const INVITE_PROTOCOL_VERSION = 13;
+// Lotteries among the shop's products. An older runtime never hands one over; a lottery from it is left out,
+// since it would come without the odds a lottery is never sold without.
+const SHOP_LOTTERY_PROTOCOL_VERSION = 15;
 // The sku rule GameRush applies when the author registers a product. A sku that cannot exist is rejected
 // here instead of reaching GameRush.
 const SHOP_SKU_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
@@ -295,9 +298,15 @@ export function createGRush(options = {}) {
     return active.isAvailable() && active.protocolVersion() >= SHOP_PROTOCOL_VERSION;
   }
 
+  function shopCatalogOf(raw) {
+    const catalog = shopProductsOf(raw);
+    if (!catalog || backend().protocolVersion() >= SHOP_LOTTERY_PROTOCOL_VERSION) return catalog;
+    return { ...catalog, products: catalog.products.filter((item) => item.type !== "lottery") };
+  }
+
   const shop = {
     products: () =>
-      mapped("shop.products", undefined, required(shopProductsOf), SHOP_PROTOCOL_VERSION),
+      mapped("shop.products", undefined, required(shopCatalogOf), SHOP_PROTOCOL_VERSION),
     purchase(sku) {
       if (!shopSupported()) return Promise.resolve(unsupported());
       if (typeof sku !== "string" || !SHOP_SKU_PATTERN.test(sku)) {
