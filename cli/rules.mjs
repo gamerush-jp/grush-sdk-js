@@ -7,7 +7,7 @@
 // 写しを変えるときは GameRush の規則に合わせる（GameRush 側のテストが写しの一致を照合する）。
 
 /** ビルドの合計の上限（バイト）。 */
-export const MAX_BUILD_BYTES = 50 * 1024 * 1024;
+export const MAX_BUILD_BYTES = 100 * 1024 * 1024;
 /** ビルドのファイル数の上限。 */
 export const MAX_BUILD_FILE_COUNT = 2000;
 /** HTML 1ファイルの上限（バイト）。サーバは中身を読める大きさまでしか受けない。 */

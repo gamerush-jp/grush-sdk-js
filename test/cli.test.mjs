@@ -17,7 +17,12 @@ import {
   login,
 } from "../cli/login.mjs";
 import { run } from "../cli/main.mjs";
-import { MAX_BUILD_FILE_COUNT, stripSingleRootFolder, validateBuildFiles } from "../cli/rules.mjs";
+import {
+  MAX_BUILD_BYTES,
+  MAX_BUILD_FILE_COUNT,
+  stripSingleRootFolder,
+  validateBuildFiles,
+} from "../cli/rules.mjs";
 import { collectBuild, precheckBuild } from "../cli/upload.mjs";
 import { crc32, readZipEntries } from "../cli/zip.mjs";
 
@@ -336,7 +341,7 @@ describe("上げる前の検査", () => {
       [[ok, { path: "a.js", size: 1 }, { path: "a.js", size: 1 }], "build.duplicatePath"],
       [[{ path: "main.js", size: 1 }], "build.missingEntry"],
       [[ok, { path: "__grush-player.json", size: 1 }], "build.conflictingEntry"],
-      [[ok, { path: "a.js", size: 50 * 1024 * 1024 }], "build.tooLarge"],
+      [[ok, { path: "a.js", size: MAX_BUILD_BYTES }], "build.tooLarge"],
       [[ok, { path: "sub/page.html.gz", size: 1 }], "build.compressedHtml"],
       [[ok, { path: "big.html", size: 5 * 1024 * 1024 + 1 }], "build.htmlTooLarge"],
       [[ok, { path: "grush.json", size: 64 * 1024 + 1 }], "build.leaderboardManifestTooLarge"],

@@ -17,7 +17,7 @@ git submodule add https://github.com/gamerush-jp/grush-sdk-js.git vendor/grush-s
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.24.0/grush-sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gamerush-jp/grush-sdk-js@v0.24.1/grush-sdk.js"></script>
 ```
 
 CDN から読むときは版を固定すること（`@main` だと、アップロード済みのビルドの挙動が後から変わる）。
@@ -56,7 +56,7 @@ CDN から読むときは版を固定すること（`@main` だと、アップ�
 型（`grush-sdk.d.ts`）が入っているので、別のパッケージは要らない。npm には出していないので、GitHub から版を固定して入れる。
 
 ```bash
-npm install github:gamerush-jp/grush-sdk-js#v0.24.0
+npm install github:gamerush-jp/grush-sdk-js#v0.24.1
 ```
 
 ```ts
@@ -583,7 +583,7 @@ npx -p github:gamerush-jp/grush-sdk-js grush upload ./dist --game <ゲーム ID>
 - `grush logout` は手元のファイルを消すだけで、トークンは期限まで有効なまま。もう使わないなら Studio の **API トークン** から失効させる
 - 環境変数 `GRUSH_TOKEN` に Studio で発行した API トークン（`grush_pat_…`）を入れると、保存したトークンの代わりにそれを使う。CI はこちらを使う。`GRUSH_ORIGIN` で接続先を変えられる
 - フォルダの中身をそのまま上げる。zip の中身が1つのフォルダに入っていて、剥がすと一番上に `index.html` が来るとき（と Godot の書き出しになるとき）は、Studio と同じくそのフォルダを剥がす。`__MACOSX` と `.DS_Store`、ソースマップ（`.js.map` / `.css.map`）、圧縮した HTML は除く。パスワード付きの zip と ZIP64 は読めない
-- 上げる前に、GameRush と同じ規則（合計 50MB・2000 ファイル・使える拡張子・パス・入口の `index.html`）で手元を検査する
+- 上げる前に、GameRush と同じ規則（合計 100MB・2000 ファイル・使える拡張子・パス・入口の `index.html`）で手元を検査する
 - 一番上の `grush.json` はビルドと一緒に上がり、ランキングの定義として反映される（書式は SDK ガイドのランキング）
 - Unity と Godot のビルドを GameRush のプレイヤーで起動させるには、Unity の Editor 拡張か Studio から上げる。CLI は `index.html` をそのまま使う
 - 公開の設定と審査の申請は Studio で行う

@@ -1,7 +1,7 @@
 import { inflateRawSync } from "node:zlib";
 
 // 最小限の zip の読み取り。中央ディレクトリを読み、無圧縮（stored）と deflate だけを展開する。
-// ビルドの zip は合計 50MB の上限があるので、ファイル全体をメモリに載せて読む。
+// ビルドの zip は合計 100MB の上限があるので、ファイル全体をメモリに載せて読む。
 
 const EOCD_SIGNATURE = 0x06054b50;
 const ZIP64_EOCD_LOCATOR_SIGNATURE = 0x07064b50;

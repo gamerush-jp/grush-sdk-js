@@ -30,7 +30,7 @@ import {
 import { CODES, failure, ok, unsupported } from "./result.js";
 import { createRoom } from "./room.js";
 
-export const VERSION = "0.24.0";
+export const VERSION = "0.24.1";
 const REQUIRED_PROTOCOL_VERSION = 1;
 const PLAYER_STATE_PROTOCOL_VERSION = 2;
 const SHARE_PROTOCOL_VERSION = 3;
