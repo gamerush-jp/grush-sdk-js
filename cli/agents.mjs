@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 // フォルダの名前と目印は agents/install.json にあり、Unity と Godot の SDK のメニューも同じものを読む。
 
 const AGENTS_DIR = fileURLToPath(new URL("../agents/", import.meta.url));
+// install.json の dir と pointers[].file に使える名前。プロジェクトの直下の1つの名前だけ（区切りと .. を許さない）。
+const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 
 /**
  * @typedef {{
@@ -22,7 +24,29 @@ const AGENTS_DIR = fileURLToPath(new URL("../agents/", import.meta.url));
 
 /** @param {string} [sourceDir] @returns {InstallSpec} */
 export function readInstallSpec(sourceDir = AGENTS_DIR) {
-  return JSON.parse(fs.readFileSync(path.join(sourceDir, "install.json"), "utf8"));
+  const spec = JSON.parse(fs.readFileSync(path.join(sourceDir, "install.json"), "utf8"));
+  // grush update はリリースから取った install.json を読むので、書く先がプロジェクトの直下の名前であることを確かめる。
+  const names = [
+    spec?.dir,
+    ...(Array.isArray(spec?.pointers) ? spec.pointers : [null]).map(
+      (/** @type {any} */ p) => p?.file,
+    ),
+  ];
+  const valid =
+    names.every(
+      (name) => typeof name === "string" && SAFE_NAME.test(name) && name !== "." && name !== "..",
+    ) &&
+    ["versionPlaceholder", "begin", "end"].every(
+      (key) => typeof spec[key] === "string" && spec[key] !== "",
+    ) &&
+    spec.pointers.every(
+      (/** @type {any} */ p) => typeof p.block === "string" && typeof p.create === "boolean",
+    );
+  if (!valid)
+    throw new Error(
+      `AI エージェント向けの文書の install.json の形が正しくありません: ${sourceDir}`,
+    );
+  return spec;
 }
 
 /** @param {string} text @param {string} marker */
