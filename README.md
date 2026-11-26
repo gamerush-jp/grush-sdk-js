@@ -56,7 +56,7 @@ CDN から読むときは版を固定すること（`@main` だと、アップ�
 型（`grush-sdk.d.ts`）が入っているので、別のパッケージは要らない。npm には出していないので、GitHub から版を固定して入れる。
 
 ```bash
-npm install github:gamerush-jp/grush-sdk-js#v0.23.0
+npm install github:gamerush-jp/grush-sdk-js#v0.24.0
 ```
 
 ```ts
